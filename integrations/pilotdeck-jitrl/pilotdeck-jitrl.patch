@@ -1,0 +1,3563 @@
+diff --git a/src/extension/plugins/builtin/jitrl/plugin.json b/src/extension/plugins/builtin/jitrl/plugin.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..cf22e90e51d009d95b07fc05d0bdf9002c9a25bb
+--- /dev/null
++++ b/src/extension/plugins/builtin/jitrl/plugin.json
+@@ -0,0 +1,5 @@
++{
++  "name": "jitrl",
++  "version": "0.1.0",
++  "description": "JitRL test-time RL custom router: 4-tier judge logits modulated by top-k Jaccard experience memory"
++}
+diff --git a/src/extension/plugins/builtin/jitrl/routerContribution.ts b/src/extension/plugins/builtin/jitrl/routerContribution.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..205b054626a51214336553a7875ac9e240ad86b0
+--- /dev/null
++++ b/src/extension/plugins/builtin/jitrl/routerContribution.ts
+@@ -0,0 +1,18 @@
++import type { RouterContribution } from "../../../contributions/RouterContribution.js";
++import { createJitrlCustomRouter, JITRL_ROUTER_ID } from "../../../../router/jitrl/router.js";
++
++/**
++ * Programmatic router contribution for the builtin `jitrl` plugin.
++ *
++ * `PluginRuntime.lookupRouter()` may construct a fresh custom-router instance
++ * on every router decide; the JitRL engine, its seeded RNG stream and the
++ * persisted episodes live in a process-wide shared cache keyed by the
++ * configured memory path (see router/jitrl/memoryStore.ts), so instance
++ * churn never resets learning state.
++ */
++export const jitrlRouterContribution: RouterContribution = {
++  id: JITRL_ROUTER_ID,
++  description:
++    "JitRL test-time RL router: judge 4-tier logits modulated by experience memory (z' = z + beta*A_norm).",
++  createCustomRouter: createJitrlCustomRouter,
++};
+diff --git a/src/extension/plugins/builtin/loadBuiltinPlugins.ts b/src/extension/plugins/builtin/loadBuiltinPlugins.ts
+index 5e3114f9f471da5f8baa04d0e7d91e525a684cb1..e761c2b2af2bfbded9a16239381237c8cc41348a 100644
+--- a/src/extension/plugins/builtin/loadBuiltinPlugins.ts
++++ b/src/extension/plugins/builtin/loadBuiltinPlugins.ts
+@@ -3,6 +3,16 @@ import { fileURLToPath } from "node:url";
+ import { readdirSync, readFileSync, statSync } from "node:fs";
+ import type { PilotDeckLoadedPlugin } from "../protocol/plugin.js";
+ import { parsePluginManifest } from "../config/parsePluginManifest.js";
++import { jitrlRouterContribution } from "./jitrl/routerContribution.js";
++
++/**
++ * Programmatic contributions attached to builtin plugins after the manifest
++ * scan. Disk manifests cannot carry functions, so builtin plugins that need
++ * code-backed contributions (e.g. the JitRL router) register them here.
++ */
++const BUILTIN_ROUTER_CONTRIBUTIONS: Record<string, PilotDeckLoadedPlugin["routerContributions"]> = {
++  jitrl: [jitrlRouterContribution],
++};
+ 
+ const __filename = fileURLToPath(import.meta.url);
+ const BUILTIN_DIR = resolve(__filename, "..");
+@@ -30,6 +40,7 @@ export function loadBuiltinPlugins(): PilotDeckLoadedPlugin[] {
+         source: "builtin",
+         manifest,
+         mcpServers: manifest.mcpServers,
++        routerContributions: BUILTIN_ROUTER_CONTRIBUTIONS[manifest.name],
+       });
+     }
+   } catch { /* builtin dir scan failed — fine, no builtins */ }
+diff --git a/src/extension/plugins/runtime/PluginRuntime.ts b/src/extension/plugins/runtime/PluginRuntime.ts
+index b4a1c2c432f953cdf7384cd8ca4a015f77a53564..ecda2d8c23648a407f8a344577c0c79022d270b6 100644
+--- a/src/extension/plugins/runtime/PluginRuntime.ts
++++ b/src/extension/plugins/runtime/PluginRuntime.ts
+@@ -223,7 +223,13 @@ export class PluginRuntime {
+       ]),
+       Promise.all(
+         (this.options.builtinPlugins ?? []).map((plugin) =>
+-          loadPluginFromPath(plugin.path, "builtin").catch(() => plugin),
++          loadPluginFromPath(plugin.path, "builtin")
++            // A builtin plugin reloaded from disk loses the programmatic
++            // contributions (functions cannot be serialized into plugin.json),
++            // so re-attach them — otherwise RouterContribution lookups would
++            // silently break after the first registry refresh.
++            .then((loaded) => ({ ...loaded, ...pickProgrammaticContributions(plugin) }))
++            .catch(() => plugin),
+         ),
+       ),
+     ]);
+@@ -254,6 +260,16 @@ function isLoadedPlugin(value: PilotDeckLoadedPlugin | undefined): value is Pilo
+   return value !== undefined;
+ }
+ 
++/** Programmatic (function-backed) contributions that must survive a disk reload. */
++function pickProgrammaticContributions(
++  plugin: PilotDeckLoadedPlugin,
++): Pick<PilotDeckLoadedPlugin, "routerContributions" | "promptContributions"> {
++  return {
++    ...(plugin.routerContributions ? { routerContributions: plugin.routerContributions } : {}),
++    ...(plugin.promptContributions ? { promptContributions: plugin.promptContributions } : {}),
++  };
++}
++
+ function enabledBuiltinPlugins(
+   plugins: PilotDeckLoadedPlugin[],
+   enabled: Record<string, boolean>,
+diff --git a/src/router/RouterRuntime.ts b/src/router/RouterRuntime.ts
+index 6965b379685fa8500a646326b9c507a898985c3d..c8a33a490226dfb67fc265f5a0840cff51644f03 100644
+--- a/src/router/RouterRuntime.ts
++++ b/src/router/RouterRuntime.ts
+@@ -18,8 +18,9 @@ import {
+   type RouterModelRef,
+ } from "./config/schema.js";
+ import type {
+-  PilotDeckCustomRouter,
++  CustomRouterContext,
+   CustomRouterRegistry,
++  PilotDeckCustomRouter,
+ } from "./customRouter/customRouter.js";
+ import { noopCustomRouterRegistry } from "./customRouter/customRouter.js";
+ import { isFallbackEligible, planFallback } from "./fallback/runFallbackChain.js";
+@@ -44,6 +45,7 @@ import {
+ } from "./retry/zeroUsageRetry.js";
+ import { TokenStatsCollector } from "./stats/TokenStatsCollector.js";
+ import { classifyAndRoute } from "./tokenSaver/classifyAndRoute.js";
++import { extractLastUserMessage } from "./tokenSaver/extractLastUserMessage.js";
+ import { countMessagesTokens, countResponseTokens, dispose as disposeTokenizer } from "./utils/countTokens.js";
+ import { calculateCacheReadCost, calculateInputCost } from "./utils/modelPricing.js";
+ import {
+@@ -305,13 +307,13 @@ export function createRouterRuntime(
+       return undefined;
+     }
+     try {
++      const context = buildCustomRouterContext(input.sessionId, input.isMainAgent);
++      if (!context) {
++        return undefined;
++      }
+       return await router.decide({
+         ...input,
+-        context: {
+-          sessionId: input.sessionId,
+-          isMainAgent: input.isMainAgent,
+-          scenarios: Object.keys(config.scenarios ?? {}),
+-        },
++        context,
+       });
+     } catch (error) {
+       events.emit({
+@@ -324,6 +326,80 @@ export function createRouterRuntime(
+     }
+   }
+ 
++  function buildCustomRouterContext(
++    sessionId: string,
++    isMainAgent: boolean,
++  ): CustomRouterContext | undefined {
++    if (!config.customRouter) {
++      return undefined;
++    }
++    return {
++      sessionId,
++      isMainAgent,
++      scenarios: Object.keys(config.scenarios ?? {}),
++      modelRuntime: deps.modelRuntime,
++      judgeRuntime,
++      config: config.customRouter,
++      routerConfig: config,
++    };
++  }
++
++  /** Assistant text collected from a finished attempt's event buffer. */
++  function collectResponseText(buffered: CanonicalModelEvent[]): string | undefined {
++    let text = "";
++    for (const event of buffered) {
++      if (event.type === "text_delta") {
++        text += event.text;
++      }
++    }
++    return text.length > 0 ? text : undefined;
++  }
++
++  /**
++   * Fire the optional custom-router learning hook after a custom-routed
++   * execution settles. Errors thrown by the hook never break the stream.
++   */
++  async function emitCustomTurnOutcome(params: {
++    ctx: RouterExecuteContext;
++    decision: RouterDecision;
++    request: CanonicalModelRequest;
++    usage?: import("../model/index.js").CanonicalUsage;
++    responseText?: string;
++    error?: import("../model/index.js").CanonicalModelError;
++  }): Promise<void> {
++    if (!config.customRouter || params.decision.resolvedFrom !== "custom") {
++      return;
++    }
++    const router = customRouters.lookupRouter(config.customRouter.extensionId);
++    if (!router?.onTurnOutcome) {
++      return;
++    }
++    const context = buildCustomRouterContext(
++      params.ctx.sessionId,
++      !params.decision.isSubagent,
++    );
++    if (!context) {
++      return;
++    }
++    try {
++      await router.onTurnOutcome({
++        sessionId: params.ctx.sessionId,
++        turnId: params.ctx.turnId,
++        projectPath: params.ctx.projectPath,
++        userMessage: extractLastUserMessage(params.request.messages),
++        decision: params.decision,
++        usage: params.usage,
++        response: params.responseText,
++        error: params.error,
++        context,
++      });
++    } catch (error) {
++      console.warn(
++        `[router] custom router onTurnOutcome failed: ${error instanceof Error ? error.message : String(error)}`,
++      );
++    }
++  }
++
+   async function decide(input: RouterDecisionInput): Promise<RouterDecision> {
+     if (!enabled) {
+       return {
+@@ -375,7 +451,8 @@ export function createRouterRuntime(
+         ? "explicit"
+         : "scenario";
+ 
+-    let tokenSaverTier: string | undefined;
++    let tokenSaverTier: string | undefined =
++      typeof custom?.tokenSaverTier === "string" ? custom.tokenSaverTier : undefined;
+     let cacheAwareSwitch: RouterMutationsLog["cacheAwareSwitch"];
+     const subagentPolicy = config.tokenSaver?.subagent?.policy ?? DEFAULT_SUBAGENT_POLICY;
+     if (
+@@ -668,6 +745,12 @@ export function createRouterRuntime(
+         error,
+       });
+       yield { type: "error", error };
++      await emitCustomTurnOutcome({
++        ctx,
++        decision,
++        request,
++        error,
++      });
+       return;
+     }
+ 
+@@ -937,6 +1020,13 @@ export function createRouterRuntime(
+           startedAt,
+           endedAt,
+         });
++        await emitCustomTurnOutcome({
++          ctx,
++          decision: attemptDecision,
++          request,
++          usage: finalUsage,
++          responseText: collectResponseText(outcome.buffered),
++        });
+         return;
+       }
+     }
+@@ -980,6 +1070,14 @@ export function createRouterRuntime(
+         }
+       }
+       yield { type: "error", error: { ...lastError, provider: lastAttempt.provider, model: lastAttempt.model } };
++      await emitCustomTurnOutcome({
++        ctx,
++        decision: lastDecision,
++        request,
++        usage: failUsage,
++        responseText: collectResponseText(lastBuffered),
++        error: lastError,
++      });
+     }
+   }
+ 
+diff --git a/src/router/config/parseRouterConfig.ts b/src/router/config/parseRouterConfig.ts
+index 9167fcf0738fef5b52b7a4bf3464ded25044ca7b..fa6d796d00e7193ee819900fae5afd1e9d91094e 100644
+--- a/src/router/config/parseRouterConfig.ts
++++ b/src/router/config/parseRouterConfig.ts
+@@ -98,7 +98,7 @@ export function parseRouterConfig(
+   const tokenSaver = parseTokenSaver(raw.tokenSaver, modelConfig, diagnostics);
+   const autoOrchestrate = parseAutoOrchestrate(raw.autoOrchestrate, modelConfig, tokenSaver, diagnostics);
+   const stats = parseStats(raw.stats, modelConfig, diagnostics);
+-  const customRouter = parseCustomRouter(raw.customRouter, diagnostics);
++  const customRouter = parseCustomRouter(raw.customRouter, modelConfig, diagnostics);
+ 
+   return {
+     config: {
+@@ -662,6 +662,7 @@ function parseStats(
+ 
+ function parseCustomRouter(
+   raw: unknown,
++  modelConfig: ModelConfig,
+   diagnostics: RouterConfigDiagnostic[],
+ ): RouterCustomRouterConfig | undefined {
+   if (raw === undefined) {
+@@ -676,7 +677,159 @@ function parseCustomRouter(
+     });
+     return undefined;
+   }
+-  return { extensionId: raw.extensionId };
++
++  // Backward compatibility: a legacy `{ extensionId }`-only block stays valid.
++  const config: RouterCustomRouterConfig = { extensionId: raw.extensionId };
++
++  const judge = optionalRef(raw.judge, "router.customRouter.judge", modelConfig, diagnostics);
++  if (judge) {
++    config.judge = judge;
++  }
++  const evaluator = optionalRef(raw.evaluator, "router.customRouter.evaluator", modelConfig, diagnostics);
++  if (evaluator) {
++    config.evaluator = evaluator;
++  }
++
++  if (raw.tiers !== undefined) {
++    if (!isRecord(raw.tiers)) {
++      diagnostics.push({
++        code: "ROUTER_CUSTOM_ROUTER_TIERS_INVALID",
++        severity: "fatal",
++        path: "router.customRouter.tiers",
++        message: "router.customRouter.tiers must be an object keyed by tier name.",
++      });
++    } else {
++      const tiers: Record<string, RouterModelRef> = {};
++      for (const [name, body] of Object.entries(raw.tiers)) {
++        const rawRef = typeof body === "string"
++          ? body
++          : isRecord(body) && typeof body.model === "string" ? body.model : undefined;
++        if (!rawRef) {
++          diagnostics.push({
++            code: "ROUTER_CUSTOM_ROUTER_TIER_INVALID",
++            severity: "fatal",
++            path: `router.customRouter.tiers.${name}`,
++            message: `tier ${name} must declare a provider/model string (or an object with a model string).`,
++          });
++          continue;
++        }
++        const ref = consumeRef(rawRef, `router.customRouter.tiers.${name}`, modelConfig, diagnostics);
++        if (ref) {
++          tiers[name] = ref;
++        }
++      }
++      if (Object.keys(tiers).length > 0) {
++        config.tiers = tiers;
++      }
++    }
++  }
++
++  if (raw.hyperparams !== undefined) {
++    if (!isRecord(raw.hyperparams)) {
++      diagnostics.push({
++        code: "ROUTER_CUSTOM_ROUTER_HYPERPARAMS_INVALID",
++        severity: "fatal",
++        path: "router.customRouter.hyperparams",
++        message: "router.customRouter.hyperparams must be an object.",
++      });
++    } else {
++      const hyperparams = parseJitRLHyperparams(raw.hyperparams, diagnostics);
++      if (hyperparams && Object.keys(hyperparams).length > 0) {
++        config.hyperparams = hyperparams;
++      }
++    }
++  }
++
++  if (typeof raw.memoryPath === "string" && raw.memoryPath.length > 0) {
++    config.memoryPath = raw.memoryPath;
++  }
++
++  const timeouts: Array<["evalTimeoutMs" | "judgeTimeoutMs", string]> = [
++    ["evalTimeoutMs", "router.customRouter.evalTimeoutMs"],
++    ["judgeTimeoutMs", "router.customRouter.judgeTimeoutMs"],
++  ];
++  for (const [key, path] of timeouts) {
++    const value = raw[key];
++    if (value === undefined) {
++      continue;
++    }
++    if (typeof value === "number" && Number.isInteger(value) && value > 0) {
++      config[key] = value;
++    } else {
++      diagnostics.push({
++        code: "ROUTER_CUSTOM_ROUTER_TIMEOUT_INVALID",
++        severity: "fatal",
++        path,
++        message: `${path} must be a positive integer (milliseconds).`,
++      });
++    }
++  }
++
++  return config;
++}
++
++const JITRL_HYPERPARAM_SPEC: Array<{
++  key: keyof import("./schema.js").JitRLHyperparamsConfig;
++  kind: "positiveInt" | "int" | "nonNegativeNumber" | "unitNumber" | "number";
++}> = [
++  { key: "k", kind: "positiveInt" },
++  { key: "beta", kind: "number" },
++  { key: "lam", kind: "unitNumber" },
++  { key: "alpha", kind: "number" },
++  { key: "jaccardThreshold", kind: "unitNumber" },
++  { key: "zMin", kind: "number" },
++  { key: "memoryCap", kind: "positiveInt" },
++  { key: "seed", kind: "int" },
++  { key: "minNeighbors", kind: "positiveInt" },
++];
++
++function parseJitRLHyperparams(
++  raw: Record<string, unknown>,
++  diagnostics: RouterConfigDiagnostic[],
++): import("./schema.js").JitRLHyperparamsConfig | undefined {
++  const out: import("./schema.js").JitRLHyperparamsConfig = {};
++  let valid = true;
++  for (const entry of JITRL_HYPERPARAM_SPEC) {
++    const value = raw[entry.key];
++    if (value === undefined) {
++      continue;
++    }
++    const path = `router.customRouter.hyperparams.${entry.key}`;
++    const isFiniteNumber = typeof value === "number" && Number.isFinite(value);
++    let ok = false;
++    if (isFiniteNumber) {
++      const num = value as number;
++      switch (entry.kind) {
++        case "positiveInt":
++          ok = Number.isInteger(num) && num > 0;
++          break;
++        case "int":
++          ok = Number.isInteger(num);
++          break;
++        case "unitNumber":
++          ok = num >= 0 && num <= 1;
++          break;
++        case "nonNegativeNumber":
++          ok = num >= 0;
++          break;
++        case "number":
++          ok = true;
++          break;
++      }
++    }
++    if (!ok) {
++      diagnostics.push({
++        code: "ROUTER_CUSTOM_ROUTER_HYPERPARAM_INVALID",
++        severity: "fatal",
++        path,
++        message: `${path} is not a valid ${entry.kind} value.`,
++      });
++      valid = false;
++      continue;
++    }
++    (out as Record<string, number>)[entry.key] = value as number;
++  }
++  return valid ? out : undefined;
+ }
+ 
+ function consumeRef(
+diff --git a/src/router/config/schema.ts b/src/router/config/schema.ts
+index 5056d179d85d8f313aee0b5241f68508bae134bc..b56612665b0a96789c4c407b74285793f66d2ba6 100644
+--- a/src/router/config/schema.ts
++++ b/src/router/config/schema.ts
+@@ -77,6 +77,37 @@ export const LITELLM_ROUTER_MAX_FALLBACKS = 5;
+ 
+ export type RouterCustomRouterConfig = {
+   extensionId: string;
++  /** Judge model used to score the four tiers (optional; deterministic heuristic fallback when absent). */
++  judge?: RouterModelRef;
++  /** Evaluator model used to review routed responses (defaults to judge when absent). */
++  evaluator?: RouterModelRef;
++  /** Tier name -> provider/model candidate set used by the custom router ("tiers/candidates"). */
++  tiers?: Record<string, RouterModelRef>;
++  /** JitRL engine hyperparameters (defaults mirror the Python jitrl_core spec). */
++  hyperparams?: JitRLHyperparamsConfig;
++  /** Override the default <pilotHome>/router/jitrl-memory.json path (tests). */
++  memoryPath?: string;
++  /** Timeout (ms) for the post-turn evaluator request. Default 15000. */
++  evalTimeoutMs?: number;
++  /** Timeout (ms) for each judge scoring request. Default 15000. */
++  judgeTimeoutMs?: number;
++};
++
++/**
++ * JitRL hyperparameters (spec section 2, verbatim defaults):
++ * k=10, beta=5.0, lam=0.05, alpha=5.0, jaccard_threshold=0.5, z_min=-10.0,
++ * memory_cap=5000, seed=42, min_neighbors=1 (C1 gate; 1 == C0 semantics).
++ */
++export type JitRLHyperparamsConfig = {
++  k?: number;
++  beta?: number;
++  lam?: number;
++  alpha?: number;
++  jaccardThreshold?: number;
++  zMin?: number;
++  memoryCap?: number;
++  seed?: number;
++  minNeighbors?: number;
+ };
+ 
+ export type RouterConfig = {
+diff --git a/src/router/customRouter/customRouter.ts b/src/router/customRouter/customRouter.ts
+index 354e28693c3353d7a8aee602dd3c6929cce39050..aa4897b70f52378b4176acc3d6cca9c58c19db88 100644
+--- a/src/router/customRouter/customRouter.ts
++++ b/src/router/customRouter/customRouter.ts
+@@ -1,18 +1,56 @@
++import type { CanonicalModelError, CanonicalUsage, ModelRuntime } from "../../model/index.js";
++import type { RouterConfig, RouterCustomRouterConfig } from "../config/schema.js";
+ import type { RouterDecision, RouterDecisionInput } from "../protocol/decision.js";
+ 
+ export type CustomRouterContext = {
+   sessionId: string;
+   isMainAgent: boolean;
+   scenarios: ReadonlyArray<string>;
++  /**
++   * Model runtime injected by the Router. Custom routers MUST call judge /
++   * evaluator models through this runtime (or `judgeRuntime`) directly —
++   * never recursively through the Router itself.
++   */
++  modelRuntime: ModelRuntime;
++  /** Judge runtime (falls back to modelRuntime when unset). */
++  judgeRuntime: ModelRuntime;
++  /** Parsed `router.customRouter` section (extensionId, judge, evaluator, tiers, hyperparams, memoryPath, timeouts). */
++  config: RouterCustomRouterConfig;
++  /** Full resolved router configuration (e.g. tokenSaver tier fallbacks). */
++  routerConfig: RouterConfig;
+ };
+ 
+ export type CustomRouterDecideInput = RouterDecisionInput & {
+   context: CustomRouterContext;
+ };
+ 
++/**
++ * Turn-level outcome handed to `PilotDeckCustomRouter.onTurnOutcome` after a
++ * custom-routed execution settles — success or failure. Lets learning-based
++ * routers (JitRL) close the loop without re-entering the Router.
++ */
++export type CustomRouterTurnOutcome = {
++  sessionId: string;
++  turnId: string;
++  projectPath?: string;
++  userMessage?: string;
++  decision: RouterDecision;
++  usage?: CanonicalUsage;
++  /** Assistant text collected from the executed stream (may be partial on failure). */
++  response?: string;
++  error?: CanonicalModelError;
++  context: CustomRouterContext;
++};
++
+ export type PilotDeckCustomRouter = {
+   id: string;
+   decide(input: CustomRouterDecideInput): Promise<Partial<RouterDecision> | undefined>;
++  /**
++   * Optional learning hook. Called once per custom-routed `execute()` after
++   * the stream settles: on success with usage + response, on failure with
++   * the terminal error. Errors thrown by the hook never break the stream.
++   */
++  onTurnOutcome?(outcome: CustomRouterTurnOutcome): void | Promise<void>;
+ };
+ 
+ export type CustomRouterRegistry = {
+diff --git a/src/router/index.ts b/src/router/index.ts
+index 49c6a687254c0598ef1dbb29dc37d66baca2cbc3..4a4bb65eab69ac61dd42e6b4e58f4913dd673a26 100644
+--- a/src/router/index.ts
++++ b/src/router/index.ts
+@@ -71,8 +71,55 @@ export {
+   type CustomRouterContext,
+   type CustomRouterDecideInput,
+   type CustomRouterRegistry,
++  type CustomRouterTurnOutcome,
+   type PilotDeckCustomRouter,
+ } from "./customRouter/customRouter.js";
++export {
++  JITRL_ROUTER_ID,
++  JITRL_TIERS,
++  createJitrlCustomRouter,
++  resolveTierCandidates,
++  type JitRLRouterRuntimeInfo,
++} from "./jitrl/router.js";
++export {
++  JitRLEngine,
++  type DecisionResult,
++} from "./jitrl/engine.js";
++export {
++  ExperienceMemory,
++  type JitRLEpisode,
++  type RetrievedEpisode,
++} from "./jitrl/memory.js";
++export {
++  JitRLJudgeClient,
++  JITRL_JUDGE_DEFAULT_TIMEOUT_MS,
++  scoreToLogit,
++  type JitRLJudgeDeps,
++  type JitRLJudgeInput,
++  type JudgeResult,
++} from "./jitrl/judge.js";
++export {
++  computeCostSaving,
++  computeJitRLReward,
++  episodePrice,
++  evaluateQuality,
++  type JitRLRewardDeps,
++  type JitRLRewardInput,
++  type JitRLRewardResult,
++} from "./jitrl/reward.js";
++export {
++  DEFAULT_JITRL_HYPERPARAMS,
++  TIERS as JITRL_TIER_ORDER,
++  createSeededRandom,
++  type JitRLHyperparams,
++} from "./jitrl/tiers.js";
++export {
++  defaultJitRLMemoryPath,
++  getSharedJitRLState,
++  JitRLMemoryStore,
++  resetSharedJitRLStates,
++  type SharedJitRLState,
++} from "./jitrl/memoryStore.js";
+ export {
+   ProviderHealthTracker,
+   type ProviderHealthState,
+diff --git a/src/router/jitrl/engine.ts b/src/router/jitrl/engine.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4bb48f5d2dd5800dd0bb8b74fba61f92d7518997
+--- /dev/null
++++ b/src/router/jitrl/engine.ts
+@@ -0,0 +1,182 @@
++/**
++ * JitRL engine: decide (retrieve + value estimate + logit modulation) & learn.
++ * TypeScript port of `jitrl_core/engine.py` (test-time RL, no gradient).
++ *
++ * Memory of (state, tier, reward): retrieve similar experiences, estimate
++ * per-tier advantage, modulate judge logits z' = z + beta * A_norm, and write
++ * episodes back.
++ *
++ * C1 min-neighbor gate: if 0 < nRetrieved < minNeighbors, modulation is
++ * suppressed (zMod = zBase, A_norm = 0, chosen = baseChoice). minNeighbors=1
++ * (default) reproduces C0 exactly. estimateValues is always called so the
++ * RNG stream is independent of the gate.
++ */
++import {
++  createSeededRandom,
++  GATE_BELOW_MIN_NEIGHBORS,
++  GATE_NO_NEIGHBORS,
++  type JitRLGateReason,
++  type JitRLHyperparams,
++  resolveJitRLHyperparams,
++  TIERS,
++} from "./tiers.js";
++import { ExperienceMemory, type JitRLEpisode } from "./memory.js";
++import { chooseTier, clampLogits, modulateLogits, type TierLogits } from "./policy.js";
++import { estimateValues, type TierValueMap } from "./value.js";
++import { intentClass, taskSignature } from "./state.js";
++
++export type DecisionResult = {
++  intentClass: string;
++  /** sorted (canonical memory form) */
++  signatureTokens: string[];
++  nRetrieved: number;
++  topSimilarity: number;
++  V: number;
++  Q: TierValueMap;
++  A_norm: TierValueMap;
++  zBase: TierLogits;
++  zMod: TierLogits;
++  chosenTier: string;
++  baseChoice: string;
++  flipped: boolean;
++  /** gate threshold in force for this decide */
++  minNeighbors: number;
++  /** true iff the C0 modulation path ran */
++  modulationActive: boolean;
++  gateReason: JitRLGateReason | undefined;
++  retrievedEpisodeIds: Array<string | number>;
++};
++
++export class JitRLEngine {
++  readonly hyperparams: JitRLHyperparams;
++  readonly memory: ExperienceMemory;
++  /** engine-owned seeded rng for the lambda exploration branch */
++  private readonly rng: () => number;
++
++  constructor(
++    options?: {
++      hyperparams?: Partial<JitRLHyperparams>;
++      memory?: ExperienceMemory;
++      /** injectable for tests (replaces the seeded default) */
++      rng?: () => number;
++    },
++  ) {
++    this.hyperparams = resolveJitRLHyperparams(options?.hyperparams);
++    this.memory = options?.memory ?? new ExperienceMemory(this.hyperparams.memoryCap);
++    this.rng = options?.rng ?? createSeededRandom(this.hyperparams.seed);
++  }
++
++  decide(userMessage: string, tierLogits: TierLogits): DecisionResult {
++    const cfg = this.hyperparams;
++    const intent = intentClass(userMessage);
++    const tokens = taskSignature(userMessage);
++    const tokenSet = new Set(tokens);
++
++    const matches = this.memory.retrieve(intent, tokenSet, {
++      k: cfg.k,
++      threshold: cfg.jaccardThreshold,
++    });
++    const topSim = matches.length > 0 ? matches[0]!.similarity : 0.0;
++    const entries = matches.map((match) => match.entry);
++
++    // estimateValues is ALWAYS called (even when the gate below fires) so the
++    // engine RNG stream stays identical for the same learn/decide sequence,
++    // regardless of minNeighbors.
++    const est = estimateValues(entries, {
++      rng: this.rng,
++      lam: cfg.lam,
++      alpha: cfg.alpha,
++      tiers: TIERS,
++    });
++
++    const zBase = clampLogits(tierLogits, cfg.zMin, TIERS);
++    let gateReason: JitRLGateReason | undefined;
++    let zMod: TierLogits;
++    let aNorm: TierValueMap;
++    if (est.nRetrieved === 0) {
++      // empty N(s): V=0 and NO modulation (pure baseline judge)
++      gateReason = GATE_NO_NEIGHBORS;
++      zMod = { ...zBase };
++      aNorm = zeros();
++    } else if (est.nRetrieved < cfg.minNeighbors) {
++      // C1 min-neighbor gate: insufficient memory evidence -> degrade to the
++      // native judge (z_mod = z_base, A_norm = 0).
++      gateReason = GATE_BELOW_MIN_NEIGHBORS;
++      zMod = { ...zBase };
++      aNorm = zeros();
++    } else {
++      // C0 modulation path: z' = z + beta * A_norm
++      gateReason = undefined;
++      aNorm = est.A_norm;
++      zMod = modulateLogits(zBase, aNorm, { beta: cfg.beta, zMin: cfg.zMin, tiers: TIERS });
++    }
++
++    const baseChoice = chooseTier(zBase, TIERS);
++    const chosen = chooseTier(zMod, TIERS);
++
++    return {
++      intentClass: intent,
++      signatureTokens: [...tokens].sort(),
++      nRetrieved: est.nRetrieved,
++      topSimilarity: topSim,
++      V: est.V,
++      Q: { ...est.Q },
++      A_norm: { ...aNorm },
++      zBase,
++      zMod,
++      chosenTier: chosen,
++      baseChoice,
++      flipped: chosen !== baseChoice,
++      minNeighbors: cfg.minNeighbors,
++      modulationActive: gateReason === undefined,
++      gateReason,
++      retrievedEpisodeIds: entries.map((entry) => entry.episode_id),
++    };
++  }
++
++  /** Episode ended: append the entry; memory enforces the cap (drop oldest). */
++  learn(input: {
++    intent: string;
++    signatureTokens: string[];
++    tier: string;
++    reward: number;
++    episodeId: string | number;
++    ts?: number;
++  }): JitRLEpisode {
++    const entry: JitRLEpisode = {
++      intent_class: input.intent,
++      signature_tokens: [...input.signatureTokens].sort(),
++      tier: input.tier,
++      G: Number(input.reward),
++      ts: input.ts !== undefined ? Number(input.ts) : Date.now(),
++      episode_id: input.episodeId,
++    };
++    this.memory.add(entry);
++    return entry;
++  }
++
++  updateFromMessage(
++    userMessage: string,
++    chosenTier: string,
++    reward: number,
++    episodeId: string | number,
++    ts?: number,
++  ): JitRLEpisode {
++    return this.learn({
++      intent: intentClass(userMessage),
++      signatureTokens: taskSignature(userMessage),
++      tier: chosenTier,
++      reward,
++      episodeId,
++      ts,
++    });
++  }
++}
++
++function zeros(): TierValueMap {
++  const out: TierValueMap = {};
++  for (const tier of TIERS) {
++    out[tier] = 0.0;
++  }
++  return out;
++}
+diff --git a/src/router/jitrl/judge.ts b/src/router/jitrl/judge.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b37a64585a914b7f3e2c3b3b3f337f8b4b9e248f
+--- /dev/null
++++ b/src/router/jitrl/judge.ts
+@@ -0,0 +1,294 @@
++/**
++ * JitRL judge: produces a 4-tier logit vector z over {simple, medium,
++ * complex, reasoning} for a user message.
++ *
++ * The Python reference (local_judge, Method B) extracts z per tier via a
++ * force-emission request against a llama.cpp endpoint and reads the tier
++ * name-token logprobs. The PilotDeck canonical ModelRuntime response carries
++ * no logprobs, so this MVP implements the sanctioned conservative
++ * equivalent: FOUR parallel scoring requests (one per tier) through the
++ * injected ModelRuntime.complete — never routed through the Router — each
++ * asking the judge model to rate the tier fit 0..10, converted to a logit
++ * via the logit of the midpoint bin probability.
++ *
++ * If the judge is not configured, or ANY per-tier request fails / times out
++ * / cannot be parsed, we fall back to a fully DETERMINISTIC heuristic judge
++ * (a port of jitrl_core.mock_judge.MockJudgeClient) so callers always
++ * receive a complete 4-tier numeric vector.
++ */
++import type {
++  CanonicalModelRequest,
++  CanonicalModelResponse,
++  ModelRuntime,
++} from "../../model/index.js";
++import type { RouterModelRef } from "../config/schema.js";
++import { chooseTier, type TierLogits } from "./policy.js";
++import { intentClass } from "./state.js";
++import { createSeededRandom, TIERS, type JitRLTier } from "./tiers.js";
++
++export type JudgeResult = {
++  /** all 4 tiers */
++  tierLogits: TierLogits;
++  chosenTier: string;
++  rawOutput: string;
++  latencyMs: number;
++  /** "model": four scoring requests; "fallback": deterministic heuristic. */
++  source: "model" | "fallback";
++  /** Human-readable reason when source === "fallback". */
++  fallbackReason?: string;
++};
++
++export type JitRLJudgeInput = {
++  userMessage: string;
++  /** Tier from the previous turn (continuation context for the judge). */
++  previousTier?: string;
++};
++
++export type JitRLJudgeDeps = {
++  /** Injected by RouterRuntime; the JitRL judge must NOT recurse through the Router. */
++  judgeRuntime?: ModelRuntime;
++  judge?: RouterModelRef;
++  timeoutMs?: number;
++  abortSignal?: AbortSignal;
++  /** Seed for the deterministic fallback noise (default 42). */
++  fallbackSeed?: number;
++};
++
++export const JITRL_JUDGE_DEFAULT_TIMEOUT_MS = 15_000;
++
++const SCORE_MIN = 0;
++const SCORE_MAX = 10;
++
++const CODE_CUES: readonly string[] = [
++  "```", "def ", "函数", "单元测试", "测试用例", "实现", "重构",
++  "function", "implement", "unit test",
++];
++const DOC_CUES: readonly string[] = [
++  "写一封", "文档", "报告", "通知", "公告", "周报", "邮件",
++  "documentation", "report", "notice", "memo", "email",
++];
++const LONG_MESSAGE_CHARS = 300;
++const CUE_MASS = 8.0;
++const MEDIUM_BIAS = 1.0;
++const PREV_TIER_MASS = 6.0;
++const NOISE = 0.05;
++
++export class JitRLJudgeClient {
++  private readonly fallbackRng: () => number;
++
++  constructor(private readonly deps: JitRLJudgeDeps = {}) {
++    this.fallbackRng = createSeededRandom(deps.fallbackSeed ?? 42);
++  }
++
++  async judge(input: JitRLJudgeInput): Promise<JudgeResult> {
++    const started = Date.now();
++    const modelResult = await this.judgeViaModel(input, started);
++    if (modelResult) {
++      return modelResult;
++    }
++    return this.deterministicFallback(input, started);
++  }
++
++  // ------------------------------------------------------------- model path
++  private async judgeViaModel(
++    input: JitRLJudgeInput,
++    started: number,
++  ): Promise<JudgeResult | undefined> {
++    const { judgeRuntime, judge } = this.deps;
++    if (!judgeRuntime || !judge) {
++      return undefined;
++    }
++
++    const tierResults = await Promise.all(
++      TIERS.map((tier) =>
++        scoreTierFit({
++          judgeRuntime,
++          judge,
++          tier,
++          userMessage: input.userMessage,
++          previousTier: input.previousTier,
++          timeoutMs: this.deps.timeoutMs ?? JITRL_JUDGE_DEFAULT_TIMEOUT_MS,
++          abortSignal: this.deps.abortSignal,
++        }),
++      ),
++    );
++
++    const tierLogits: TierLogits = {};
++    for (let index = 0; index < TIERS.length; index += 1) {
++      const score = tierResults[index];
++      if (score === undefined) {
++        // Any per-tier failure degrades the WHOLE vector to the deterministic
++        // fallback — mixing model scores with heuristic scores would produce
++        // a vector with two different scales.
++        return undefined;
++      }
++      tierLogits[TIERS[index]] = scoreToLogit(score);
++    }
++
++    const chosenTier = chooseTier(tierLogits, TIERS);
++    return {
++      tierLogits,
++      chosenTier,
++      rawOutput: `<tier>${chosenTier}</tier>`,
++      latencyMs: Date.now() - started,
++      source: "model",
++    };
++  }
++
++  // ------------------------------------------------- deterministic fallback
++  private deterministicFallback(input: JitRLJudgeInput, started: number): JudgeResult {
++    const scores: TierLogits = {};
++    for (const tier of TIERS) {
++      scores[tier] = 0.0;
++    }
++
++    const previousTier = input.previousTier;
++    if (intentClass(input.userMessage) === "continuation" && isTier(previousTier)) {
++      scores[previousTier] += PREV_TIER_MASS;
++    } else {
++      // systematic surface bias: always extra preference for medium
++      scores.medium += MEDIUM_BIAS;
++      const low = input.userMessage.toLowerCase();
++      if (CODE_CUES.some((cue) => low.includes(cue))) {
++        scores.complex += CUE_MASS;
++      } else if (DOC_CUES.some((cue) => low.includes(cue))) {
++        scores.simple += CUE_MASS;
++      }
++      if (input.userMessage.length >= LONG_MESSAGE_CHARS) {
++        scores.reasoning += CUE_MASS;
++      }
++    }
++
++    for (const tier of TIERS) {
++      scores[tier] += (this.fallbackRng() * 2 - 1) * NOISE;
++    }
++
++    const chosenTier = chooseTier(scores, TIERS);
++    return {
++      tierLogits: scores,
++      chosenTier,
++      rawOutput: `<tier>${chosenTier}</tier>`,
++      latencyMs: Date.now() - started,
++      source: "fallback",
++      fallbackReason: this.deps.judgeRuntime && this.deps.judge
++        ? "judge request failed or unparsable"
++        : "no judge model configured",
++    };
++  }
++}
++
++function isTier(value: unknown): value is JitRLTier {
++  return typeof value === "string" && (TIERS as readonly string[]).includes(value);
++}
++
++/** logit of the score's midpoint bin: p = (score + 0.5) / 11, z = ln(p / (1-p)). */
++export function scoreToLogit(score: number): number {
++  const clamped = Math.min(SCORE_MAX, Math.max(SCORE_MIN, Math.round(score)));
++  const p = (clamped + 0.5) / (SCORE_MAX + 1);
++  const safeP = Math.min(0.98, Math.max(0.02, p));
++  return Math.log(safeP / (1 - safeP));
++}
++
++function buildTierScorePrompt(input: {
++  tier: string;
++  userMessage: string;
++  previousTier?: string;
++}): string {
++  const continuation = input.previousTier
++    ? `\nNote: the previous turn was classified as "${input.previousTier}". Short continuation or acknowledgment messages ("go", "continue", "ok", "好的", "继续") should keep that tier; only a genuinely new task justifies a different tier.\n`
++    : "";
++  return `You are a model-tier classifier for the PilotDeck router. Rate how well the tier "${input.tier}" fits the user message below.
++
++Tiers:
++- simple: simple greetings, confirmations, single-step Q&A, trivial file writes, remembering rules
++- medium: single tool call, short text generation, 1-2 file read/write, code generation
++- complex: needs sub-agent orchestration: parallel workstreams, delegation to specialized agents
++- reasoning: deep single-agent work: multi-file operations, data analysis, multi-step workflows, web research, structured reports from many sources
++${continuation}
++Respond with ONLY a single integer score from 0 (terrible fit) to 10 (perfect fit). No other text.
++
++User message:
++"""
++${input.userMessage}
++"""`;
++}
++
++async function scoreTierFit(input: {
++  judgeRuntime: ModelRuntime;
++  judge: RouterModelRef;
++  tier: string;
++  userMessage: string;
++  previousTier?: string;
++  timeoutMs: number;
++  abortSignal?: AbortSignal;
++}): Promise<number | undefined> {
++  const request: CanonicalModelRequest = {
++    provider: input.judge.provider,
++    model: input.judge.model,
++    messages: [
++      {
++        role: "user",
++        content: [
++          {
++            type: "text",
++            text: buildTierScorePrompt({
++              tier: input.tier,
++              userMessage: input.userMessage,
++              previousTier: input.previousTier,
++            }),
++          },
++        ],
++      },
++    ],
++    maxOutputTokens: 32,
++    thinking: { enabled: false },
++    stream: false,
++  };
++
++  let timeout: NodeJS.Timeout | undefined;
++  const controller = new AbortController();
++  const forwardAbort = () => controller.abort(input.abortSignal?.reason);
++  input.abortSignal?.addEventListener("abort", forwardAbort, { once: true });
++  try {
++    if (input.abortSignal?.aborted) {
++      return undefined;
++    }
++    const response = await Promise.race([
++      input.judgeRuntime.complete(request, { signal: controller.signal }),
++      new Promise<never>((_, reject) => {
++        timeout = setTimeout(() => {
++          controller.abort(new Error("jitrl judge timeout"));
++          reject(new Error("jitrl judge timeout"));
++        }, Math.max(500, input.timeoutMs));
++      }),
++    ]);
++    return parseScore(response);
++  } catch {
++    return undefined;
++  } finally {
++    if (timeout) {
++      clearTimeout(timeout);
++    }
++    input.abortSignal?.removeEventListener("abort", forwardAbort);
++  }
++}
++
++function parseScore(response: CanonicalModelResponse): number | undefined {
++  const text = response.content
++    .filter((block) => block.type === "text")
++    .map((block) => (block.type === "text" ? block.text : ""))
++    .join("")
++    .trim();
++  const match = /-?\d+(?:\.\d+)?/.exec(text.replace(/```[a-z]*\n?/g, "").replace(/```/g, ""));
++  if (!match) {
++    return undefined;
++  }
++  const value = Number(match[0]);
++  if (!Number.isFinite(value)) {
++    return undefined;
++  }
++  if (value < SCORE_MIN || value > SCORE_MAX) {
++    return undefined;
++  }
++  return value;
++}
+diff --git a/src/router/jitrl/memory.ts b/src/router/jitrl/memory.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..572136792c831be47a0ca6df14d5dada4b78f94f
+--- /dev/null
++++ b/src/router/jitrl/memory.ts
+@@ -0,0 +1,78 @@
++/**
++ * Experience memory: (state, tier, reward) episodes with top-k Jaccard
++ * retrieval. TypeScript port of `jitrl_core/memory.py` (verbatim semantics).
++ *
++ * Entry schema (spec, verbatim keys):
++ *   { intent_class, signature_tokens (sorted), tier, G, ts, episode_id }
++ *
++ * Retrieval: stage 1 filter by same intent_class; stage 2 token-set Jaccard
++ * >= threshold, sorted by similarity desc, top-k. Ties keep insertion order
++ * (stable sort). Capacity: memoryCap, drop oldest on overflow.
++ */
++import { jaccard } from "./state.js";
++
++export type JitRLEpisode = {
++  intent_class: string;
++  signature_tokens: string[];
++  tier: string;
++  G: number;
++  ts: number;
++  episode_id: string | number;
++};
++
++export type RetrievedEpisode = { entry: JitRLEpisode; similarity: number };
++
++export class ExperienceMemory {
++  private readonly cap: number;
++  private readonly entriesInternal: JitRLEpisode[] = [];
++
++  constructor(cap: number = 5000) {
++    if (cap <= 0) {
++      throw new Error("cap must be positive");
++    }
++    this.cap = Math.floor(cap);
++  }
++
++  get length(): number {
++    return this.entriesInternal.length;
++  }
++
++  /** Append an entry; evict oldest beyond cap. */
++  add(entry: JitRLEpisode): void {
++    this.entriesInternal.push(entry);
++    if (this.entriesInternal.length > this.cap) {
++      const drop = this.entriesInternal.length - this.cap;
++      this.entriesInternal.splice(0, drop);
++    }
++  }
++
++  /** Copy of all entries (oldest first). */
++  entries(): JitRLEpisode[] {
++    return [...this.entriesInternal];
++  }
++
++  /**
++   * Stage-1 intent filter + stage-2 Jaccard threshold, top-k by similarity.
++   * Stable sort: ties resolve to insertion order (oldest first).
++   */
++  retrieve(
++    intent: string,
++    tokenSet: ReadonlySet<string>,
++    options?: { k?: number; threshold?: number },
++  ): RetrievedEpisode[] {
++    const k = options?.k ?? 10;
++    const threshold = options?.threshold ?? 0.5;
++    const scored: RetrievedEpisode[] = [];
++    for (const entry of this.entriesInternal) {
++      if (entry.intent_class !== intent) {
++        continue;
++      }
++      const sim = jaccard(new Set(entry.signature_tokens ?? []), tokenSet);
++      if (sim >= threshold) {
++        scored.push({ entry, similarity: sim });
++      }
++    }
++    scored.sort((a, b) => b.similarity - a.similarity);
++    return scored.slice(0, k);
++  }
++}
+diff --git a/src/router/jitrl/memoryStore.ts b/src/router/jitrl/memoryStore.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..00725ccaf78c41df1ebe387ef31c28a97c9cb10e
+--- /dev/null
++++ b/src/router/jitrl/memoryStore.ts
+@@ -0,0 +1,211 @@
++/**
++ * Persistent JitRL memory: `<pilotHome>/router/jitrl-memory.json`.
++ *
++ * - Atomic write (tmp file + rename) with a trailing-edge throttle, so burst
++ *   learns coalesce into one flush.
++ * - Shared per-path state cache: `PluginRuntime.lookupRouter()` may create a
++ *   fresh custom-router instance on every router decide, so the engine, its
++ *   seeded RNG stream and the in-memory episodes MUST be cached per resolved
++ *   memory path (test injectable) rather than per plugin instance.
++ */
++import * as fs from "node:fs";
++import * as path from "node:path";
++import { resolvePilotHome } from "../../pilot/paths.js";
++import { ExperienceMemory, type JitRLEpisode } from "./memory.js";
++import { JitRLEngine } from "./engine.js";
++import type { JitRLHyperparams } from "./tiers.js";
++
++const DEFAULT_MEMORY_FILE = "jitrl-memory.json";
++const DEFAULT_FLUSH_DELAY_MS = 500;
++
++export type JitRLMemoryFileShape = {
++  version: 1;
++  entries: JitRLEpisode[];
++};
++
++export class JitRLMemoryStore {
++  private readonly filePath: string;
++  private flushTimer: NodeJS.Timeout | undefined;
++  private pendingEntries: JitRLEpisode[] | undefined;
++
++  constructor(filePath: string) {
++    this.filePath = filePath;
++  }
++
++  get path(): string {
++    return this.filePath;
++  }
++
++  load(): JitRLEpisode[] {
++    try {
++      const raw = fs.readFileSync(this.filePath, "utf8");
++      const parsed = JSON.parse(raw) as Partial<JitRLMemoryFileShape>;
++      if (!parsed || !Array.isArray(parsed.entries)) {
++        return [];
++      }
++      return parsed.entries.filter(isEpisode);
++    } catch {
++      // Missing or corrupt file — start from empty (documented recovery).
++      return [];
++    }
++  }
++
++  /** Synchronous immediate save (atomic: tmp + rename). */
++  saveSync(entries: JitRLEpisode[]): void {
++    const payload: JitRLMemoryFileShape = { version: 1, entries };
++    try {
++      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
++    } catch {
++      // ignore — writeFileSync below surfaces the real error
++    }
++    const tmpPath = `${this.filePath}.tmp-${process.pid}-${Date.now()}`;
++    try {
++      fs.writeFileSync(tmpPath, JSON.stringify(payload), "utf8");
++      fs.renameSync(tmpPath, this.filePath);
++    } catch {
++      try {
++        fs.rmSync(tmpPath, { force: true });
++      } catch {
++        // best-effort cleanup
++      }
++      throw new Error(`JitRL memory persistence failed at ${this.filePath}`);
++    }
++  }
++
++  /** Schedule a throttled save; bursty learns coalesce into one flush. */
++  scheduleFlush(readEntries: () => JitRLEpisode[], delayMs: number = DEFAULT_FLUSH_DELAY_MS): void {
++    this.pendingEntries = readEntries();
++    if (this.flushTimer) {
++      return;
++    }
++    this.flushTimer = setTimeout(() => {
++      this.flushTimer = undefined;
++      const pending = this.pendingEntries;
++      this.pendingEntries = undefined;
++      if (pending) {
++        try {
++          this.saveSync(pending);
++        } catch (error) {
++          console.warn(
++            "[jitrl] memory flush failed:",
++            error instanceof Error ? error.message : String(error),
++          );
++        }
++      }
++    }, delayMs);
++    // Do not keep the event loop alive for a background flush.
++    this.flushTimer.unref?.();
++  }
++
++  /** Flush any pending throttled write immediately (used by tests/shutdown). */
++  flushNow(readEntries?: () => JitRLEpisode[]): void {
++    const pending = readEntries ? readEntries() : this.pendingEntries;
++    this.pendingEntries = undefined;
++    if (this.flushTimer) {
++      clearTimeout(this.flushTimer);
++      this.flushTimer = undefined;
++    }
++    if (pending) {
++      this.saveSync(pending);
++    }
++  }
++}
++
++function isEpisode(value: unknown): value is JitRLEpisode {
++  if (typeof value !== "object" || value === null) {
++    return false;
++  }
++  const entry = value as Partial<JitRLEpisode>;
++  return (
++    typeof entry.intent_class === "string" &&
++    Array.isArray(entry.signature_tokens) &&
++    entry.signature_tokens.every((token) => typeof token === "string") &&
++    typeof entry.tier === "string" &&
++    typeof entry.G === "number" &&
++    typeof entry.ts === "number" &&
++    (typeof entry.episode_id === "string" || typeof entry.episode_id === "number")
++  );
++}
++
++export type SharedJitRLState = {
++  memory: ExperienceMemory;
++  engine: JitRLEngine;
++  store: JitRLMemoryStore;
++  hyperparams: JitRLHyperparams;
++  memoryPath: string;
++};
++
++const sharedStates = new Map<string, SharedJitRLState>();
++
++export function defaultJitRLMemoryPath(): string {
++  return path.join(resolvePilotHome(), "router", DEFAULT_MEMORY_FILE);
++}
++
++function sameHyperparams(a: JitRLHyperparams, b: JitRLHyperparams): boolean {
++  return (
++    a.k === b.k &&
++    a.beta === b.beta &&
++    a.lam === b.lam &&
++    a.alpha === b.alpha &&
++    a.jaccardThreshold === b.jaccardThreshold &&
++    a.zMin === b.zMin &&
++    a.memoryCap === b.memoryCap &&
++    a.seed === b.seed &&
++    a.minNeighbors === b.minNeighbors
++  );
++}
++
++/**
++ * Get (or create) the process-wide shared state for a memory path. The
++ * in-memory episodes survive plugin-instance churn; on a hyperparameter
++ * change the engine is rebuilt around the SAME episodes (memory contents are
++ * preserved; only the seeded RNG stream restarts — documented deviation).
++ */
++export function getSharedJitRLState(input: {
++  memoryPath?: string;
++  hyperparams?: Partial<JitRLHyperparams>;
++}): SharedJitRLState {
++  const memoryPath = input.memoryPath ?? defaultJitRLMemoryPath();
++  const existing = sharedStates.get(memoryPath);
++  if (existing && sameHyperparams(existing.hyperparams, resolveHyperparamsFor(input))) {
++    return existing;
++  }
++  const hyperparams = resolveHyperparamsFor(input);
++  const store = existing?.store ?? new JitRLMemoryStore(memoryPath);
++  const seedEntries = existing ? existing.memory.entries() : store.load();
++  const memory = new ExperienceMemory(hyperparams.memoryCap);
++  for (const entry of seedEntries) {
++    memory.add(entry);
++  }
++  const engine = new JitRLEngine({ hyperparams, memory });
++  const state: SharedJitRLState = { memory, engine, store, hyperparams, memoryPath };
++  sharedStates.set(memoryPath, state);
++  return state;
++}
++
++function resolveHyperparamsFor(input: { hyperparams?: Partial<JitRLHyperparams> }): JitRLHyperparams {
++  const resolved: JitRLHyperparams = {
++    k: input.hyperparams?.k ?? 10,
++    beta: input.hyperparams?.beta ?? 5.0,
++    lam: input.hyperparams?.lam ?? 0.05,
++    alpha: input.hyperparams?.alpha ?? 5.0,
++    jaccardThreshold: input.hyperparams?.jaccardThreshold ?? 0.5,
++    zMin: input.hyperparams?.zMin ?? -10.0,
++    memoryCap: input.hyperparams?.memoryCap ?? 5000,
++    seed: input.hyperparams?.seed ?? 42,
++    minNeighbors: input.hyperparams?.minNeighbors ?? 1,
++  };
++  return resolved;
++}
++
++/** Test hook: drop all cached shared states. */
++export function resetSharedJitRLStates(): void {
++  for (const state of sharedStates.values()) {
++    try {
++      state.store.flushNow(() => state.memory.entries());
++    } catch {
++      // best-effort flush during reset
++    }
++  }
++  sharedStates.clear();
++}
+diff --git a/src/router/jitrl/policy.ts b/src/router/jitrl/policy.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ffdeeef007cde86f3df18e8b5c5c8bbd88e250ae
+--- /dev/null
++++ b/src/router/jitrl/policy.ts
+@@ -0,0 +1,54 @@
++/**
++ * Policy: closed-form logit modulation (spec section 2, port of
++ * `jitrl_core/policy.py` — verbatim).
++ *
++ *     z'(tier) = z(tier) + beta * A_norm(tier);  chosen = argmax z'
++ *
++ * zMin is the documented lower clamp for logits (both base and modulated).
++ * argmax ties resolve to the FIRST tier in canonical TIERS order.
++ */
++import { TIERS } from "./tiers.js";
++
++export type TierLogits = Record<string, number>;
++
++export function clampLogits(
++  z: TierLogits,
++  zMin: number,
++  tiers: readonly string[] = TIERS,
++): TierLogits {
++  const out: TierLogits = {};
++  for (const tier of tiers) {
++    out[tier] = Math.max(Number(z[tier] ?? 0.0), zMin);
++  }
++  return out;
++}
++
++export function modulateLogits(
++  zBase: TierLogits,
++  aNorm: TierLogits,
++  options?: { beta?: number; zMin?: number; tiers?: readonly string[] },
++): TierLogits {
++  const beta = options?.beta ?? 5.0;
++  const zMin = options?.zMin ?? -10.0;
++  const tiers = options?.tiers ?? TIERS;
++  const out: TierLogits = {};
++  for (const tier of tiers) {
++    const value = Number(zBase[tier] ?? 0.0) + beta * Number(aNorm[tier] ?? 0.0);
++    out[tier] = Math.max(value, zMin);
++  }
++  return out;
++}
++
++/** argmax with deterministic tie-break: first max in canonical TIERS order. */
++export function chooseTier(z: TierLogits, tiers: readonly string[] = TIERS): string {
++  let best = tiers[0]!;
++  let bestValue = Number(z[best] ?? 0.0);
++  for (const tier of tiers.slice(1)) {
++    const value = Number(z[tier] ?? 0.0);
++    if (value > bestValue) {
++      best = tier;
++      bestValue = value;
++    }
++  }
++  return best;
++}
+diff --git a/src/router/jitrl/reward.ts b/src/router/jitrl/reward.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e6f496c278388af62aeba40189499baf5b4f018e
+--- /dev/null
++++ b/src/router/jitrl/reward.ts
+@@ -0,0 +1,217 @@
++/**
++ * JitRL reward: r = 0.6 * quality + 0.3 * costSaving.
++ *
++ * - quality: the configured evaluator model reviews the (user message,
++ *   response) pair through the injected ModelRuntime.complete — never routed
++ *   through the Router. Returns a [0,1] score. If the evaluation request
++ *   fails, times out, or cannot be parsed, the caller MUST NOT write memory.
++ * - costSaving: episode price via the router's existing pricing utilities
++ *   (lookupModelPricing), normalized against the MOST EXPENSIVE candidate in
++ *   the same tier candidate set and clamped to [0,1].
++ *
++ * The fixed assumption profile (1500 input / 800 output tokens per episode,
++ * documented in jitrl_core/rewards.py) is used when no real usage is
++ * available.
++ */
++import type { CanonicalModelRequest, ModelRuntime } from "../../model/index.js";
++import type { RouterModelRef } from "../config/schema.js";
++import { lookupModelPricing, type RouterModelPricingMap } from "../utils/modelPricing.js";
++
++export const JITRL_REWARD_W_QUALITY = 0.6;
++export const JITRL_REWARD_W_COST = 0.3;
++
++/** Fixed per-episode assumption profile (documented; replaced by real usage). */
++export const JITRL_EPISODE_INPUT_TOKENS = 1500;
++export const JITRL_EPISODE_OUTPUT_TOKENS = 800;
++
++export const JITRL_EVALUATOR_DEFAULT_TIMEOUT_MS = 15_000;
++
++export type JitRLRewardInput = {
++  userMessage: string;
++  responseText: string;
++  chosenTier: string;
++  chosenModel: RouterModelRef;
++  /** Same candidate set used for routing (tier → model). */
++  candidates: readonly RouterModelRef[];
++  usage?: { inputTokens?: number; outputTokens?: number };
++};
++
++export type JitRLRewardResult = {
++  reward: number;
++  quality: number;
++  costSaving: number;
++};
++
++export type JitRLRewardDeps = {
++  evaluatorRuntime?: ModelRuntime;
++  evaluator?: RouterModelRef;
++  modelPricing?: RouterModelPricingMap;
++  timeoutMs?: number;
++  abortSignal?: AbortSignal;
++};
++
++export function episodePrice(
++  provider: string,
++  model: string,
++  inputTokens: number,
++  outputTokens: number,
++  modelPricing?: RouterModelPricingMap,
++): number {
++  const pricing = lookupModelPricing(provider, model, modelPricing);
++  return (
++    (inputTokens * (pricing.input ?? 0) + outputTokens * (pricing.output ?? 0)) / 1_000_000
++  );
++}
++
++/** costSaving = clamp((mostExpensive - chosen) / mostExpensive, 0, 1). */
++export function computeCostSaving(
++  input: Pick<JitRLRewardInput, "chosenModel" | "candidates" | "usage">,
++  modelPricing?: RouterModelPricingMap,
++): number {
++  const inputTokens = input.usage?.inputTokens && input.usage.inputTokens > 0
++    ? input.usage.inputTokens
++    : JITRL_EPISODE_INPUT_TOKENS;
++  const outputTokens = input.usage?.outputTokens && input.usage.outputTokens > 0
++    ? input.usage.outputTokens
++    : JITRL_EPISODE_OUTPUT_TOKENS;
++
++  const uniqueCandidates: RouterModelRef[] = [];
++  for (const candidate of input.candidates) {
++    if (
++      !uniqueCandidates.some(
++        (existing) => existing.provider === candidate.provider && existing.model === candidate.model,
++      )
++    ) {
++      uniqueCandidates.push(candidate);
++    }
++  }
++  if (uniqueCandidates.length === 0) {
++    return 0;
++  }
++
++  let mostExpensive = 0;
++  for (const candidate of uniqueCandidates) {
++    mostExpensive = Math.max(
++      mostExpensive,
++      episodePrice(candidate.provider, candidate.model, inputTokens, outputTokens, modelPricing),
++    );
++  }
++  const chosen = episodePrice(
++    input.chosenModel.provider,
++    input.chosenModel.model,
++    inputTokens,
++    outputTokens,
++    modelPricing,
++  );
++  if (mostExpensive <= 0) {
++    return 0;
++  }
++  return Math.min(1, Math.max(0, (mostExpensive - chosen) / mostExpensive));
++}
++
++export async function evaluateQuality(
++  input: { userMessage: string; responseText: string },
++  deps: JitRLRewardDeps,
++): Promise<number | undefined> {
++  const { evaluatorRuntime, evaluator } = deps;
++  if (!evaluatorRuntime || !evaluator) {
++    return undefined;
++  }
++
++  const request: CanonicalModelRequest = {
++    provider: evaluator.provider,
++    model: evaluator.model,
++    messages: [
++      {
++        role: "user",
++        content: [
++          {
++            type: "text",
++            text: buildEvaluatorPrompt(input),
++          },
++        ],
++      },
++    ],
++    maxOutputTokens: 32,
++    thinking: { enabled: false },
++    stream: false,
++  };
++
++  let timeout: NodeJS.Timeout | undefined;
++  const controller = new AbortController();
++  const forwardAbort = () => controller.abort(deps.abortSignal?.reason);
++  deps.abortSignal?.addEventListener("abort", forwardAbort, { once: true });
++  try {
++    if (deps.abortSignal?.aborted) {
++      return undefined;
++    }
++    const response = await Promise.race([
++      evaluatorRuntime.complete(request, { signal: controller.signal }),
++      new Promise<never>((_, reject) => {
++        timeout = setTimeout(() => {
++          controller.abort(new Error("jitrl evaluator timeout"));
++          reject(new Error("jitrl evaluator timeout"));
++        }, Math.max(500, deps.timeoutMs ?? JITRL_EVALUATOR_DEFAULT_TIMEOUT_MS));
++      }),
++    ]);
++    const text = response.content
++      .filter((block) => block.type === "text")
++      .map((block) => (block.type === "text" ? block.text : ""))
++      .join("")
++      .replace(/```[a-z]*\n?/g, "")
++      .replace(/```/g, "")
++      .trim();
++    const match = /-?\d+(?:\.\d+)?/.exec(text);
++    if (!match) {
++      return undefined;
++    }
++    const value = Number(match[0]);
++    if (!Number.isFinite(value) || value < 0 || value > 10) {
++      return undefined;
++    }
++    return value / 10;
++  } catch {
++    return undefined;
++  } finally {
++    if (timeout) {
++      clearTimeout(timeout);
++    }
++    deps.abortSignal?.removeEventListener("abort", forwardAbort);
++  }
++}
++
++export async function computeJitRLReward(
++  input: JitRLRewardInput,
++  deps: JitRLRewardDeps,
++): Promise<JitRLRewardResult | undefined> {
++  const quality = await evaluateQuality(
++    { userMessage: input.userMessage, responseText: input.responseText },
++    deps,
++  );
++  if (quality === undefined) {
++    // Evaluation failed — the caller must NOT write memory.
++    return undefined;
++  }
++  const costSaving = computeCostSaving(input, deps.modelPricing);
++  return {
++    reward: JITRL_REWARD_W_QUALITY * quality + JITRL_REWARD_W_COST * costSaving,
++    quality,
++    costSaving,
++  };
++}
++
++function buildEvaluatorPrompt(input: { userMessage: string; responseText: string }): string {
++  return `You are a response quality evaluator for the PilotDeck router. Rate how well the assistant response answers the user message. Judge correctness, completeness and relevance. Ignore style.
++
++Respond with ONLY a single integer score from 0 (worthless or wrong) to 10 (excellent). No other text.
++
++User message:
++"""
++${input.userMessage}
++"""
++
++Assistant response:
++"""
++${input.responseText.slice(0, 4000)}
++"""`;
++}
+diff --git a/src/router/jitrl/router.ts b/src/router/jitrl/router.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..df01a57c72c3a92c7a09428cc174aa474af941a1
+--- /dev/null
++++ b/src/router/jitrl/router.ts
+@@ -0,0 +1,176 @@
++/**
++ * JitRL custom router (MVP): PilotDeckCustomRouter implementation wiring the
++ * TypeScript JitRL engine into the PilotDeck Router through the official
++ * contribution interface.
++ *
++ * decide(userMessage):
++ *   1. judge  -> 4-tier logit vector z (ModelRuntime.complete scoring
++ *      requests, or the deterministic heuristic fallback);
++ *   2. engine -> z' = z + beta * A_norm over top-k Jaccard neighbors
++ *      (min-neighbor gate, deterministic tie-break);
++ *   3. chosen tier maps to the configured candidate model.
++ *
++ * onTurnOutcome(turn):
++ *   reward = 0.6 * quality + 0.3 * costSaving; quality is reviewed by the
++ *   configured evaluator model. Memory is written ONLY when the evaluation
++ *   succeeds (directive: evaluation failure -> no learning). Execution
++ *   failures produce no episode (no meaningful quality signal).
++ */
++import type {
++  CustomRouterContext,
++  CustomRouterDecideInput,
++  CustomRouterTurnOutcome,
++  PilotDeckCustomRouter,
++} from "../customRouter/customRouter.js";
++import type { RouterModelRef } from "../config/schema.js";
++import { extractLastUserMessage } from "../tokenSaver/extractLastUserMessage.js";
++import { JitRLJudgeClient } from "./judge.js";
++import { getSharedJitRLState } from "./memoryStore.js";
++import { computeJitRLReward } from "./reward.js";
++import { TIERS } from "./tiers.js";
++
++export const JITRL_ROUTER_ID = "jitrl";
++
++export type JitRLRouterRuntimeInfo = {
++  tierLogits: Record<string, number>;
++  chosenTier: string;
++  baseChoice: string;
++  judgeSource: "model" | "fallback";
++  gateReason: string | undefined;
++  nRetrieved: number;
++};
++
++/** Resolve the tier -> candidate model map (customRouter.tiers, falling back to tokenSaver tiers). */
++export function resolveTierCandidates(context: CustomRouterContext): Map<string, RouterModelRef> {
++  const candidates = new Map<string, RouterModelRef>();
++  for (const [name, ref] of Object.entries(context.config.tiers ?? {})) {
++    candidates.set(name, ref);
++  }
++  if (candidates.size === 0 && context.routerConfig.tokenSaver?.enabled) {
++    for (const [name, tier] of Object.entries(context.routerConfig.tokenSaver.tiers ?? {})) {
++      candidates.set(name, tier.model);
++    }
++  }
++  return candidates;
++}
++
++export function createJitrlCustomRouter(): PilotDeckCustomRouter {
++  return {
++    id: JITRL_ROUTER_ID,
++
++    async decide(input: CustomRouterDecideInput): Promise<Partial<import("../protocol/decision.js").RouterDecision> | undefined> {
++      const context = input.context;
++      const userMessage = extractLastUserMessage(input.request.messages);
++      if (!userMessage) {
++        return undefined;
++      }
++
++      const candidates = resolveTierCandidates(context);
++      if (candidates.size === 0) {
++        // No tier candidates configured — let the scenario/default routing win.
++        return undefined;
++      }
++
++      const shared = getSharedJitRLState({
++        memoryPath: context.config.memoryPath,
++        hyperparams: context.config.hyperparams,
++      });
++
++      const judge = new JitRLJudgeClient({
++        judgeRuntime: context.judgeRuntime,
++        judge: context.config.judge,
++        timeoutMs: context.config.judgeTimeoutMs,
++        abortSignal: input.abortSignal,
++      });
++      const judgeResult = await judge.judge({
++        userMessage,
++        previousTier: input.metadata?.previousTier,
++      });
++
++      const decision = shared.engine.decide(userMessage, judgeResult.tierLogits);
++
++      const selection =
++        candidates.get(decision.chosenTier) ??
++        candidates.get(context.routerConfig.tokenSaver?.defaultTier ?? "") ??
++        [...candidates.values()][0]!;
++
++      console.log(
++        `[jitrl] tier=${decision.chosenTier} (base=${decision.baseChoice} flipped=${decision.flipped}) ` +
++        `model=${selection.provider}/${selection.model} judge=${judgeResult.source} ` +
++        `n=${decision.nRetrieved} gate=${decision.gateReason ?? "modulate"}`,
++      );
++
++      return {
++        provider: selection.provider,
++        model: selection.model,
++        tokenSaverTier: decision.chosenTier,
++      };
++    },
++
++    async onTurnOutcome(outcome: CustomRouterTurnOutcome): Promise<void> {
++      const context = outcome.context;
++      if (outcome.error) {
++        // Execution failure: no meaningful quality signal -> no episode.
++        console.warn(
++          `[jitrl] turn failed (tier=${outcome.decision.tokenSaverTier ?? "?"}, ` +
++          `code=${outcome.error.code}) — skipping memory write`,
++        );
++        return;
++      }
++
++      const userMessage = outcome.userMessage;
++      const tier = outcome.decision.tokenSaverTier;
++      if (!userMessage || !tier) {
++        return;
++      }
++
++      const candidates = [...resolveTierCandidates(context).values()];
++      const evaluator = context.config.evaluator ?? context.config.judge;
++      const reward = await computeJitRLReward(
++        {
++          userMessage,
++          responseText: outcome.response ?? "",
++          chosenTier: tier,
++          chosenModel: {
++            id: `${outcome.decision.provider}/${outcome.decision.model}`,
++            provider: outcome.decision.provider,
++            model: outcome.decision.model,
++          },
++          candidates,
++          usage: outcome.usage,
++        },
++        {
++          evaluatorRuntime: context.modelRuntime,
++          evaluator,
++          modelPricing: context.routerConfig.stats?.modelPricing,
++          timeoutMs: context.config.evalTimeoutMs,
++        },
++      );
++
++      if (!reward) {
++        // Evaluator failure (or no evaluator configured): do NOT write memory.
++        console.warn("[jitrl] evaluation failed — skipping memory write");
++        return;
++      }
++
++      const shared = getSharedJitRLState({
++        memoryPath: context.config.memoryPath,
++        hyperparams: context.config.hyperparams,
++      });
++      shared.engine.updateFromMessage(
++        userMessage,
++        tier,
++        reward.reward,
++        `jitrl:${outcome.sessionId}:${outcome.turnId}`,
++      );
++      shared.store.scheduleFlush(() => shared.memory.entries());
++      console.log(
++        `[jitrl] learned tier=${tier} reward=${reward.reward.toFixed(3)} ` +
++        `(quality=${reward.quality.toFixed(2)} costSaving=${reward.costSaving.toFixed(2)})`,
++      );
++    },
++  };
++}
++
++/** Tier names the JitRL engine understands (re-exported for tests/UX). */
++export const JITRL_TIERS = TIERS;
+diff --git a/src/router/jitrl/state.ts b/src/router/jitrl/state.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3ac67e96552bc5ae2c53bbd4e3f5cf8f927de022
+--- /dev/null
++++ b/src/router/jitrl/state.ts
+@@ -0,0 +1,145 @@
++/**
++ * State abstraction: intent classification + task signature.
++ * TypeScript port of `jitrl_core/state.py` (spec section 2, verbatim semantics).
++ *
++ * - intentClass(message): keyword rules over an ORDERED map, specificity
++ *   descending, first match wins; fallback "other".
++ * - taskSignature(message): normalization pipeline
++ *     1. fenced code blocks -> <code>; 4+ space indented blocks -> <code>
++ *     2. URL -> <url>; file path -> <path>; number -> <num>;
++ *        quoted segment longer than 8 chars -> <str>
++ *     3. lowercase; strip punctuation but keep placeholder angle brackets
++ *     4. tokenize: latin/digit runs are tokens; CJK runs -> char bigrams
++ * - Context (turn number, previous tier) lives in the router layer and is
++ *   deliberately NOT part of the retrieval key.
++ */
++
++/** Ordered rules: specificity descending, first match wins (spec examples verbatim, plus English equivalents). */
++export const INTENT_RULES: ReadonlyArray<readonly [string, readonly string[]]> = [
++  ["code_gen", [
++    "写测试", "单元测试", "实现一个", "写一个函数",
++    "write tests", "unit test", "write a function", "implement", "test case",
++  ]],
++  ["data_analysis", [
++    "分析", "数据", "统计", "对比",
++    "analy", "statistic", "compare",
++  ]],
++  ["refactor", [
++    "重构", "优化这段", "改写",
++    "refactor", "optimize this", "rewrite",
++  ]],
++  ["chat_qa", [
++    "你好", "谢谢", "记住", "嗨",
++    "hello", "thanks", "hi", "remember",
++  ]],
++  ["continuation", [
++    "继续", "好的", "嗯", "可以", "接着",
++    "continue", "ok", "go on",
++  ]],
++  ["info_retrieval", [
++    "检索", "查找", "综合",
++    "retriev", "find", "search", "look up",
++  ]],
++  ["doc_writing", [
++    "写一封", "文档", "报告", "通知",
++    "doc", "report", "letter", "notice", "memo",
++  ]],
++];
++
++export const INTENT_CLASSES: readonly string[] = [...INTENT_RULES.map(([name]) => name), "other"];
++
++const CODE_FENCE_RE = /```[\s\S]*?```/g;
++const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
++const PATH_RE = /[\w./\\-]+\.\w{1,4}/g;
++const QUOTED_RE = /"([^"]{9,})"|“([^”]{9,})”/g;
++const NUM_RE = /\d+(?:\.\d+)?/g;
++const TOKEN_RE = /<[a-z]+>|[a-z0-9_]+|[\u4e00-\u9fff]+/g;
++const CJK_FULL_RE = /^[\u4e00-\u9fff]+$/;
++const INDENTED_LINE_RE = /^(?: {4}|\t)/;
++
++export function intentClass(message: string): string {
++  const low = message.toLowerCase();
++  for (const [bucket, keywords] of INTENT_RULES) {
++    for (const keyword of keywords) {
++      if (low.includes(keyword)) {
++        return bucket;
++      }
++    }
++  }
++  return "other";
++}
++
++function replaceIndentedCode(text: string): string {
++  /** Collapse blocks where >=1 line starts with 4+ spaces (or a tab) into <code>. */
++  const lines = text.split("\n");
++  const out: string[] = [];
++  let inBlock = false;
++  let blockOpened = false;
++  for (const line of lines) {
++    if (INDENTED_LINE_RE.test(line)) {
++      if (!inBlock) {
++        out.push("<code>");
++        inBlock = true;
++        blockOpened = true;
++      }
++      continue;
++    }
++    if (inBlock && line.trim() === "") {
++      // blank line may belong to the block; keep absorbing
++      continue;
++    }
++    inBlock = false;
++    out.push(line);
++  }
++  if (!blockOpened) {
++    return text;
++  }
++  return out.join("\n");
++}
++
++export function taskSignature(message: string): string[] {
++  let text = message.replace(CODE_FENCE_RE, " <code> ");
++  text = replaceIndentedCode(text);
++  text = text.replace(URL_RE, " <url> ");
++  text = text.replace(PATH_RE, " <path> ");
++  text = text.replace(NUM_RE, " <num> ");
++  text = text.replace(QUOTED_RE, " <str> ");
++  text = text.toLowerCase();
++  const tokens: string[] = [];
++  for (const token of text.match(TOKEN_RE) ?? []) {
++    if (CJK_FULL_RE.test(token)) {
++      if (token.length === 1) {
++        tokens.push(token);
++      } else {
++        for (let i = 0; i < token.length - 1; i += 1) {
++          tokens.push(token.slice(i, i + 2));
++        }
++      }
++    } else {
++      tokens.push(token);
++    }
++  }
++  return tokens;
++}
++
++export function signatureTokenSet(message: string): Set<string> {
++  return new Set(taskSignature(message));
++}
++
++export function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
++  /** Jaccard similarity of two token sets; empty-vs-empty is 1.0, one-empty 0.0. */
++  if (a.size === 0 && b.size === 0) {
++    return 1.0;
++  }
++  if (a.size === 0 || b.size === 0) {
++    return 0.0;
++  }
++  let intersection = 0;
++  for (const token of a) {
++    if (b.has(token)) {
++      intersection += 1;
++    }
++  }
++  const union = a.size + b.size - intersection;
++  return union === 0 ? 0.0 : intersection / union;
++}
+diff --git a/src/router/jitrl/tiers.ts b/src/router/jitrl/tiers.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..70fe44e55522d20cf24a059106711ecf59984afd
+--- /dev/null
++++ b/src/router/jitrl/tiers.ts
+@@ -0,0 +1,82 @@
++/**
++ * JitRL canonical tier order + hyperparameters.
++ *
++ * TypeScript port of `jitrl_core/config.py` (Session1-T4/T5 spec, verbatim):
++ * k=10, beta=5.0, lam=0.05, alpha=5.0, jaccard_threshold=0.5, z_min=-10.0,
++ * memory_cap=5000, seed=42. C1 adds min_neighbors (default 1 == C0 semantics).
++ */
++
++/** Canonical tier order; also the deterministic argmax tie-break order. */
++export const TIERS: readonly [string, string, string, string] = ["simple", "medium", "complex", "reasoning"] as const;
++
++export type JitRLTier = (typeof TIERS)[number];
++
++export function isJitRLTier(value: unknown): value is JitRLTier {
++  return typeof value === "string" && (TIERS as readonly string[]).includes(value);
++}
++
++export type JitRLHyperparams = {
++  /** top-k retrieved experiences */
++  k: number;
++  /** logit modulation strength */
++  beta: number;
++  /** exploration probability for unseen tiers */
++  lam: number;
++  /** optimism bonus: Q = V + alpha/|N(s)| */
++  alpha: number;
++  /** minimum signature similarity to retrieve */
++  jaccardThreshold: number;
++  /** lower clamp for base/modulated logits */
++  zMin: number;
++  /** drop-oldest memory capacity */
++  memoryCap: number;
++  /** seed for the engine-side lambda draws */
++  seed: number;
++  /**
++   * C1 min-neighbor gate: minimum retrieved neighbors required before logit
++   * modulation is allowed. Default 1 preserves C0 semantics exactly.
++   */
++  minNeighbors: number;
++};
++
++export const DEFAULT_JITRL_HYPERPARAMS: JitRLHyperparams = {
++  k: 10,
++  beta: 5.0,
++  lam: 0.05,
++  alpha: 5.0,
++  jaccardThreshold: 0.5,
++  zMin: -10.0,
++  memoryCap: 5000,
++  seed: 42,
++  minNeighbors: 1,
++};
++
++export function resolveJitRLHyperparams(
++  overrides?: Partial<JitRLHyperparams>,
++): JitRLHyperparams {
++  return { ...DEFAULT_JITRL_HYPERPARAMS, ...(overrides ?? {}) };
++}
++
++/** gate_reason semantics (C1 min-neighbor gate, S2-C1-PREREGISTRATION v1.0). */
++export const GATE_NO_NEIGHBORS = "no_neighbors";
++export const GATE_BELOW_MIN_NEIGHBORS = "below_min_neighbors";
++export type JitRLGateReason = "no_neighbors" | "below_min_neighbors";
++
++/**
++ * Deterministic seeded PRNG (mulberry32). Used for the engine-side lambda
++ * exploration draws; tests inject a stub for exact numeric control.
++ *
++ * Deviation from the Python reference (documented): Python uses
++ * `random.Random(seed)` (MT19937). The stream values differ, but the
++ * semantics (seeded, deterministic, independent of the gate path) match.
++ */
++export function createSeededRandom(seed: number): () => number {
++  let state = (seed | 0) || 1;
++  return () => {
++    state = (state + 0x6d2b79f5) | 0;
++    let t = state;
++    t = Math.imul(t ^ (t >>> 15), t | 1);
++    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
++    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
++  };
++}
+diff --git a/src/router/jitrl/value.ts b/src/router/jitrl/value.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..61e5cccb70567be4430ac9584cee33096376a948
+--- /dev/null
++++ b/src/router/jitrl/value.ts
+@@ -0,0 +1,101 @@
++/**
++ * Value estimation (spec section 2 — numeric port of `jitrl_core/value.py`).
++ *
++ * Given N(s) = retrieved entries (each has "G" and "tier"):
++ *     V = mean(G) over N(s);  empty N(s) -> V = 0 and NO modulation
++ *     per tier t:
++ *         |N(s,t)| > 0 -> Q(t) = mean(G over N(s,t))
++ *         else         -> with prob lam: Q(t) = V + alpha/|N(s)| ; else Q(t) = 0
++ *     A(t) = Q(t) - V
++ *     A_norm(t) = A(t) / (max|A| + 1e-8);  max|A| == 0 -> A_norm(t) = 0
++ *
++ * The `rng` is engine-owned and seeded (hyperparams.seed); inject a stub in tests.
++ */
++import { TIERS, type JitRLTier } from "./tiers.js";
++import type { JitRLEpisode } from "./memory.js";
++
++export type TierValueMap = Record<string, number>;
++
++export type ValueEstimate = {
++  V: number;
++  Q: TierValueMap;
++  A: TierValueMap;
++  A_norm: TierValueMap;
++  nRetrieved: number;
++};
++
++function zeros(): TierValueMap {
++  const out: TierValueMap = {};
++  for (const tier of TIERS) {
++    out[tier] = 0.0;
++  }
++  return out;
++}
++
++export function estimateValues(
++  entries: JitRLEpisode[],
++  options?: {
++    rng?: () => number;
++    lam?: number;
++    alpha?: number;
++    tiers?: readonly string[];
++  },
++): ValueEstimate {
++  const lam = options?.lam ?? 0.05;
++  const alpha = options?.alpha ?? 5.0;
++  const tiers = options?.tiers ?? TIERS;
++  const rng = options?.rng;
++
++  const n = entries.length;
++  if (n === 0) {
++    const z = zeros();
++    return { V: 0.0, Q: { ...z }, A: { ...z }, A_norm: { ...z }, nRetrieved: 0 };
++  }
++
++  let gSum = 0.0;
++  for (const entry of entries) {
++    gSum += Number(entry.G);
++  }
++  const V = gSum / n;
++
++  const Q: TierValueMap = {};
++  for (const tier of tiers) {
++    let gTierSum = 0.0;
++    let gTierCount = 0;
++    for (const entry of entries) {
++      if (entry.tier === tier) {
++        gTierSum += Number(entry.G);
++        gTierCount += 1;
++      }
++    }
++    if (gTierCount > 0) {
++      Q[tier] = gTierSum / gTierCount;
++    } else {
++      const explore = rng ? rng() < lam : false;
++      Q[tier] = explore ? V + alpha / n : 0.0;
++    }
++  }
++
++  const A: TierValueMap = {};
++  for (const tier of tiers) {
++    A[tier] = (Q[tier] ?? 0.0) - V;
++  }
++  let maxAbs = 0.0;
++  for (const tier of tiers) {
++    maxAbs = Math.max(maxAbs, Math.abs(A[tier] ?? 0.0));
++  }
++  const A_norm: TierValueMap = {};
++  if (maxAbs === 0.0) {
++    for (const tier of tiers) {
++      A_norm[tier] = 0.0;
++    }
++  } else {
++    for (const tier of tiers) {
++      A_norm[tier] = (A[tier] ?? 0.0) / (maxAbs + 1e-8);
++    }
++  }
++
++  return { V, Q, A, A_norm, nRetrieved: n };
++}
++
++export type { JitRLTier };
+diff --git a/tests/router/jitrl/config.test.ts b/tests/router/jitrl/config.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7a34e59be4b0f68cd84f3cf342ec9821499d9a25
+--- /dev/null
++++ b/tests/router/jitrl/config.test.ts
+@@ -0,0 +1,157 @@
++/**
++ * router.customRouter config parsing: extended schema (judge / evaluator /
++ * tiers / hyperparams / memoryPath / timeouts) + legacy extensionId-only
++ * backward compatibility.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++
++import { parseRouterConfig } from "../../../src/router/config/parseRouterConfig.js";
++import type { ModelConfig } from "../../../src/model/index.js";
++
++function makeModelConfig(models: string[]): ModelConfig {
++  const modelRecord: Record<string, { id: string; capabilities: Record<string, never>; multimodal: Record<string, never> }> = {};
++  for (const model of models) {
++    modelRecord[model] = { id: model, capabilities: {}, multimodal: {} };
++  }
++  return {
++    providers: {
++      test: {
++        id: "test",
++        protocol: "openai",
++        url: "http://localhost:1",
++        apiKey: "key",
++        headers: {},
++        models: modelRecord,
++      },
++    },
++  } as unknown as ModelConfig;
++}
++
++const MODEL_CONFIG = makeModelConfig([
++  "cheap", "mid", "big", "judge-model", "eval-model", "default-model",
++]);
++
++test("customRouter: legacy extensionId-only config stays valid", () => {
++  const result = parseRouterConfig(
++    { customRouter: { extensionId: "my.router" } },
++    MODEL_CONFIG,
++  );
++  assert.equal(result.diagnostics.length, 0);
++  assert.deepEqual(result.config?.customRouter, { extensionId: "my.router" });
++});
++
++test("customRouter: full extended config parses", () => {
++  const result = parseRouterConfig(
++    {
++      customRouter: {
++        extensionId: "jitrl",
++        judge: "test/judge-model",
++        evaluator: "test/eval-model",
++        tiers: {
++          simple: "test/cheap",
++          medium: "test/mid",
++          complex: "test/big",
++          reasoning: { model: "test/big" },
++        },
++        hyperparams: {
++          k: 7,
++          beta: 3.5,
++          lam: 0.02,
++          alpha: 4,
++          jaccardThreshold: 0.4,
++          zMin: -8,
++          memoryCap: 1000,
++          seed: 7,
++          minNeighbors: 2,
++        },
++        memoryPath: "D:/tmp/jitrl-memory.json",
++        evalTimeoutMs: 5000,
++        judgeTimeoutMs: 8000,
++      },
++    },
++    MODEL_CONFIG,
++  );
++  assert.equal(result.diagnostics.length, 0);
++  const custom = result.config?.customRouter;
++  assert.ok(custom);
++  assert.equal(custom.extensionId, "jitrl");
++  assert.deepEqual(custom.judge, { id: "test/judge-model", provider: "test", model: "judge-model" });
++  assert.deepEqual(custom.evaluator, { id: "test/eval-model", provider: "test", model: "eval-model" });
++  assert.equal(custom.tiers?.simple?.model, "cheap");
++  assert.equal(custom.tiers?.medium?.provider, "test");
++  assert.equal(custom.tiers?.reasoning?.model, "big");
++  assert.deepEqual(custom.hyperparams, {
++    k: 7, beta: 3.5, lam: 0.02, alpha: 4, jaccardThreshold: 0.4,
++    zMin: -8, memoryCap: 1000, seed: 7, minNeighbors: 2,
++  });
++  assert.equal(custom.memoryPath, "D:/tmp/jitrl-memory.json");
++  assert.equal(custom.evalTimeoutMs, 5000);
++  assert.equal(custom.judgeTimeoutMs, 8000);
++});
++
++test("customRouter: missing extensionId is fatal", () => {
++  const result = parseRouterConfig({ customRouter: { judge: "test/judge-model" } }, MODEL_CONFIG);
++  assert.ok(result.diagnostics.some((d) => d.code === "ROUTER_CUSTOM_ROUTER_INVALID" && d.severity === "fatal"));
++  assert.equal(result.config?.customRouter, undefined);
++});
++
++test("customRouter: unknown judge ref is fatal", () => {
++  const result = parseRouterConfig(
++    { customRouter: { extensionId: "jitrl", judge: "test/nope" } },
++    MODEL_CONFIG,
++  );
++  assert.ok(result.diagnostics.some((d) => d.code === "ROUTER_REF_MODEL_NOT_FOUND" && d.severity === "fatal"));
++});
++
++test("customRouter: invalid tier entry is fatal", () => {
++  const result = parseRouterConfig(
++    { customRouter: { extensionId: "jitrl", tiers: { simple: 42 } } },
++    MODEL_CONFIG,
++  );
++  assert.ok(result.diagnostics.some((d) => d.code === "ROUTER_CUSTOM_ROUTER_TIER_INVALID"));
++});
++
++test("customRouter: invalid hyperparams are fatal and dropped", () => {
++  const result = parseRouterConfig(
++    {
++      customRouter: {
++        extensionId: "jitrl",
++        hyperparams: { k: 0, lam: 2, minNeighbors: "three" },
++      },
++    },
++    MODEL_CONFIG,
++  );
++  const hyperDiagnostics = result.diagnostics.filter((d) => d.code === "ROUTER_CUSTOM_ROUTER_HYPERPARAM_INVALID");
++  assert.equal(hyperDiagnostics.length, 3);
++  assert.equal(result.config?.customRouter?.hyperparams, undefined);
++});
++
++test("customRouter: invalid timeout is fatal", () => {
++  const result = parseRouterConfig(
++    { customRouter: { extensionId: "jitrl", evalTimeoutMs: -5 } },
++    MODEL_CONFIG,
++  );
++  assert.ok(result.diagnostics.some((d) => d.code === "ROUTER_CUSTOM_ROUTER_TIMEOUT_INVALID"));
++});
++
++test("customRouter: partial hyperparams merge onto engine defaults at runtime", async () => {
++  const { DEFAULT_JITRL_HYPERPARAMS, resolveJitRLHyperparams } = await import("../../../src/router/jitrl/tiers.js");
++  const result = parseRouterConfig(
++    { customRouter: { extensionId: "jitrl", hyperparams: { beta: 2.5 } } },
++    MODEL_CONFIG,
++  );
++  const resolved = resolveJitRLHyperparams(result.config?.customRouter?.hyperparams);
++  assert.equal(resolved.beta, 2.5);
++  assert.equal(resolved.k, DEFAULT_JITRL_HYPERPARAMS.k);
++  assert.equal(resolved.minNeighbors, DEFAULT_JITRL_HYPERPARAMS.minNeighbors);
++  assert.equal(resolved.memoryCap, DEFAULT_JITRL_HYPERPARAMS.memoryCap);
++});
++
++test("customRouter: router.enabled=false drops the section entirely", () => {
++  const result = parseRouterConfig(
++    { enabled: false, customRouter: { extensionId: "jitrl" } },
++    MODEL_CONFIG,
++  );
++  assert.deepEqual(result.config, { enabled: false });
++});
+diff --git a/tests/router/jitrl/core.test.ts b/tests/router/jitrl/core.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1f3f584e0d99a1bbef99c4eb8bef1b9a19f7897
+--- /dev/null
++++ b/tests/router/jitrl/core.test.ts
+@@ -0,0 +1,349 @@
++/**
++ * Core JitRL algorithm equivalence tests (TypeScript port vs the Python
++ * jitrl_core reference — hand-computed cases mirrored from
++ * jitrl_core/tests/test_state.py, test_memory.py, test_value_policy.py and
++ * test_c1_gate.py).
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++
++import { intentClass, jaccard, taskSignature } from "../../../src/router/jitrl/state.js";
++import { ExperienceMemory, type JitRLEpisode } from "../../../src/router/jitrl/memory.js";
++import { estimateValues } from "../../../src/router/jitrl/value.js";
++import { chooseTier, clampLogits, modulateLogits } from "../../../src/router/jitrl/policy.js";
++import { JitRLEngine } from "../../../src/router/jitrl/engine.js";
++import { DEFAULT_JITRL_HYPERPARAMS, TIERS } from "../../../src/router/jitrl/tiers.js";
++
++const ZEROS: Record<string, number> = { simple: 0, medium: 0, complex: 0, reasoning: 0 };
++
++// --------------------------------------------------------------------- state
++test("intentClass: ordered keyword rules, first match wins", () => {
++  assert.equal(intentClass("你好，今天心情不错"), "chat_qa");
++  assert.equal(intentClass("帮我记住：以后所有回复都用中文"), "chat_qa");
++  assert.equal(intentClass("给下面这个函数写一个单元测试：\ndef add(a, b):\n    return a+b"), "code_gen");
++  assert.equal(
++    intentClass("分析下面这组销售数据，统计环比，对比渠道表现：\n一月 A产品 120万 B产品 300万"),
++    "data_analysis",
++  );
++  assert.equal(intentClass("继续"), "continuation");
++  assert.equal(intentClass("写一封邮件给老板"), "doc_writing");
++  assert.equal(intentClass("completely unrelated words"), "other");
++});
++
++test("taskSignature: matches the Python reference token-for-token", () => {
++  // Reference values produced by jitrl_core.state.task_signature (Python).
++  assert.deepEqual(taskSignature("你好，今天心情不错"), ["你好", "今天", "天心", "心情", "情不", "不错"]);
++  assert.deepEqual(taskSignature("继续"), ["继续"]);
++  assert.deepEqual(
++    taskSignature("给下面这个函数写一个单元测试：\ndef add(a, b):\n    return a+b"),
++    ["给下", "下面", "面这", "这个", "个函", "函数", "数写", "写一", "一个", "个单", "单元", "元测", "测试", "def", "add", "a", "b", "<code>"],
++  );
++  assert.deepEqual(
++    taskSignature("请访问 https://example.com/docs and read /tmp/workspace/file.md then answer 42 questions \"quoted long string here\""),
++    ["请访", "访问", "<url>", "and", "read", "<path>", "then", "answer", "<num>", "questions", "<str>"],
++  );
++});
++
++test("taskSignature: fenced + indented code collapse, blank-line absorption", () => {
++  assert.deepEqual(
++    taskSignature("review this:\n```python\nprint(1)\n```\nand this:\n    indented code line\n    more\n\nafter blank inside block?\noutside 123"),
++    ["review", "this", "<code>", "and", "this", "<code>", "after", "blank", "inside", "block", "outside", "<num>"],
++  );
++});
++
++test("jaccard: empty-vs-empty 1.0, one-empty 0.0, hand case", () => {
++  assert.equal(jaccard(new Set(["a", "b"]), new Set(["a", "b", "c"])), 2 / 3);
++  assert.equal(jaccard(new Set(), new Set()), 1.0);
++  assert.equal(jaccard(new Set(), new Set(["a"])), 0.0);
++  assert.equal(jaccard(new Set(["a"]), new Set()), 0.0);
++});
++
++// -------------------------------------------------------------------- memory
++function entry(
++  intent: string,
++  tokens: string[],
++  tier = "medium",
++  g = 0.0,
++  episodeId: string | number = 1,
++): JitRLEpisode {
++  return {
++    intent_class: intent,
++    signature_tokens: [...tokens].sort(),
++    tier,
++    G: g,
++    ts: 0.0,
++    episode_id: episodeId,
++  };
++}
++
++test("memory: intent bucket filter + threshold + top-k", () => {
++  const mem = new ExperienceMemory(10);
++  mem.add(entry("code_gen", ["a", "b"], "complex", 1.0, 1));
++  mem.add(entry("code_gen", ["a", "c"], "medium", 0.5, 2));
++  mem.add(entry("code_gen", ["a", "b", "z"], "simple", 2.0, 3));
++  mem.add(entry("data_analysis", ["a", "b"], "reasoning", 3.0, 4));
++
++  const matches = mem.retrieve("code_gen", new Set(["a", "b", "x"]), { k: 10, threshold: 0.0 });
++  assert.equal(matches.length, 3);
++  assert.ok(matches.every((match) => match.entry.intent_class === "code_gen"));
++
++  // similarity desc: {a,b} vs {a,b,x} = 2/3, {a,b,z} vs {a,b,x} = 0.5, {a,c} vs {a,b,x} = 0.25
++  assert.ok(Math.abs(matches[0]!.similarity - 2 / 3) < 1e-12);
++  assert.ok(Math.abs(matches[1]!.similarity - 0.5) < 1e-12);
++  assert.ok(Math.abs(matches[2]!.similarity - 0.25) < 1e-12);
++
++  const thresholded = mem.retrieve("code_gen", new Set(["a", "b", "x"]), { k: 10, threshold: 0.5 });
++  assert.equal(thresholded.length, 2);
++
++  const topK = mem.retrieve("code_gen", new Set(["a", "b", "x"]), { k: 1, threshold: 0.0 });
++  assert.equal(topK.length, 1);
++});
++
++test("memory: ties keep insertion order (stable sort)", () => {
++  const mem = new ExperienceMemory(10);
++  mem.add(entry("code_gen", ["a", "b"], "complex", 1.0, "first"));
++  mem.add(entry("code_gen", ["a", "b"], "medium", 0.5, "second"));
++  const matches = mem.retrieve("code_gen", new Set(["a", "b"]), { k: 10, threshold: 0.5 });
++  assert.deepEqual(matches.map((match) => match.entry.episode_id), ["first", "second"]);
++});
++
++test("memory: capacity evicts oldest", () => {
++  const mem = new ExperienceMemory(3);
++  for (let i = 0; i < 5; i += 1) {
++    mem.add(entry("other", [`t${i}`], "medium", i, i));
++  }
++  assert.equal(mem.length, 3);
++  assert.deepEqual(mem.entries().map((e) => e.episode_id), [2, 3, 4]);
++});
++
++// --------------------------------------------------------------------- value
++function makeEntries(): JitRLEpisode[] {
++  // N(s): G=1.0 (complex), G=0.0 (complex), G=0.5 (medium)
++  return [
++    entry("x", ["a"], "complex", 1.0, 1),
++    entry("x", ["b"], "complex", 0.0, 2),
++    entry("x", ["c"], "medium", 0.5, 3),
++  ];
++}
++
++function seqRng(values: number[]): { rng: () => number; calls: number } {
++  let index = 0;
++  let calls = 0;
++  return {
++    rng: () => {
++      calls += 1;
++      const value = values[Math.min(index, values.length - 1)]!;
++      index += 1;
++      return value;
++    },
++    get calls() {
++      return calls;
++    },
++  };
++}
++
++test("value: hand-computed V/Q/A/A_norm (no exploration)", () => {
++  const stub = seqRng([0.99, 0.99]);
++  const est = estimateValues(makeEntries(), { rng: stub.rng, lam: 0.05, alpha: 5.0 });
++  assert.equal(est.V, 0.5);
++  assert.equal(est.Q.complex, 0.5);
++  assert.equal(est.Q.medium, 0.5);
++  assert.equal(est.Q.simple, 0.0);
++  assert.equal(est.Q.reasoning, 0.0);
++  assert.equal(est.A.simple, -0.5);
++  assert.equal(est.A.medium, 0.0);
++  assert.equal(est.A.complex, 0.0);
++  assert.equal(est.A.reasoning, -0.5);
++  assert.ok(Math.abs(est.A_norm.simple! - -0.5 / (0.5 + 1e-8)) < 1e-6);
++  assert.ok(Math.abs(est.A_norm.medium!) < 1e-9);
++  assert.ok(Math.abs(est.A_norm.complex!) < 1e-9);
++  assert.ok(Math.abs(est.A_norm.reasoning! - -1.0) < 1e-6);
++  assert.equal(est.nRetrieved, 3);
++});
++
++test("value: lambda exploration branch draws in TIERS order", () => {
++  // missing tiers (simple, reasoning) draw in TIERS order:
++  // simple draws 0.01 < 0.05 -> Q = V + alpha/|N(s)| = 0.5 + 5/3
++  const stub = seqRng([0.01, 0.99]);
++  const est = estimateValues(makeEntries(), { rng: stub.rng, lam: 0.05, alpha: 5.0 });
++  const expectedQ = 0.5 + 5.0 / 3.0;
++  assert.ok(Math.abs(est.Q.simple! - expectedQ) < 1e-9);
++  assert.equal(est.Q.reasoning, 0.0);
++  assert.equal(stub.calls, 2);
++  assert.ok(Math.abs(est.A_norm.simple! - 1.0) < 1e-6);
++  assert.ok(Math.abs(est.A_norm.reasoning! - -0.5 / (expectedQ - 0.5 + 1e-8)) < 1e-6);
++});
++
++test("value: empty memory -> zeros, no modulation", () => {
++  const est = estimateValues([], { lam: 0.05, alpha: 5.0 });
++  assert.equal(est.V, 0.0);
++  assert.equal(est.nRetrieved, 0);
++  for (const tier of TIERS) {
++    assert.equal(est.A_norm[tier], 0.0);
++  }
++});
++
++test("value: max|A| == 0 -> A_norm all zero", () => {
++  const entries = TIERS.map((tier, index) => entry("x", [`t${index}`], tier, 0.5, index));
++  const est = estimateValues(entries, { lam: 0.05, alpha: 5.0 });
++  assert.equal(est.V, 0.5);
++  for (const tier of TIERS) {
++    assert.equal(est.A_norm[tier], 0.0);
++  }
++});
++
++// -------------------------------------------------------------------- policy
++const Z = { simple: 1.0, medium: 2.0, complex: 0.0, reasoning: 1.0 };
++const A_NORM = { simple: -1.0, medium: 0.0, complex: 0.0, reasoning: -1.0 };
++
++test("policy: modulation hand case, no flip", () => {
++  const zMod = modulateLogits(Z, A_NORM, { beta: 5.0, zMin: -10.0 });
++  assert.equal(zMod.simple, 1.0 - 5.0);
++  assert.equal(zMod.medium, 2.0);
++  assert.equal(zMod.complex, 0.0);
++  assert.equal(zMod.reasoning, 1.0 - 5.0);
++  assert.equal(chooseTier(zMod), "medium");
++});
++
++test("policy: optimistic advantage flips the argmax", () => {
++  const aNorm = { simple: 1.0, medium: 0.0, complex: 0.0, reasoning: 0.0 };
++  const zMod = modulateLogits(Z, aNorm, { beta: 5.0, zMin: -10.0 });
++  assert.equal(zMod.simple, 6.0);
++  assert.equal(chooseTier(Z), "medium");
++  assert.equal(chooseTier(zMod), "simple");
++});
++
++test("policy: z_min clamp on base and modulated logits", () => {
++  const clamped = clampLogits({ simple: -11.0, medium: 0.5 }, -10.0);
++  assert.equal(clamped.simple, -10.0);
++  assert.equal(clamped.medium, 0.5);
++  const zMod = modulateLogits(
++    { simple: 0.0, medium: 0.0 },
++    { simple: -2.5, medium: 0.0 },
++    { beta: 5.0, zMin: -10.0 },
++  );
++  assert.equal(zMod.simple, -10.0);
++});
++
++test("policy: deterministic tie-break is first max in TIERS order", () => {
++  assert.equal(chooseTier({ simple: 1.0, medium: 1.0, complex: 1.0, reasoning: 1.0 }), "simple");
++  assert.equal(chooseTier({ reasoning: 2.0, complex: 2.0 }), "complex");
++});
++
++// -------------------------------------------------------------------- engine
++const MSG = "分析这批销售数据，统计环比，对比渠道表现";
++const LOGITS = { simple: 0.0, medium: 1.0, complex: 0.0, reasoning: 0.0 };
++
++function learnedEngine(
++  options?: { minNeighbors?: number; n?: number; reward?: number; rng?: () => number },
++): JitRLEngine {
++  const engine = new JitRLEngine({
++    hyperparams: options?.minNeighbors !== undefined ? { minNeighbors: options.minNeighbors } : undefined,
++    ...(options?.rng ? { rng: options.rng } : {}),
++  });
++  for (let i = 0; i < (options?.n ?? 0); i += 1) {
++    engine.learn({
++      intent: "data_analysis",
++      signatureTokens: taskSignature(MSG),
++      tier: "medium",
++      reward: options?.reward ?? -0.3,
++      episodeId: i + 1,
++      ts: 0,
++    });
++  }
++  return engine;
++}
++
++test("engine: explicit minNeighbors=1 equals the default bit-for-bit", () => {
++  for (const n of [0, 1, 2, 3]) {
++    const dDefault = learnedEngine({ n }).decide(MSG, LOGITS);
++    const dOne = learnedEngine({ n, minNeighbors: 1 }).decide(MSG, LOGITS);
++    assert.deepEqual(dOne, dDefault);
++  }
++});
++
++test("engine: default modulates whenever n >= 1 (C0 formula)", () => {
++  for (const n of [1, 2, 3, 4]) {
++    const d = learnedEngine({ n }).decide(MSG, LOGITS);
++    assert.equal(d.nRetrieved, n);
++    assert.equal(d.minNeighbors, 1);
++    assert.equal(d.modulationActive, true);
++    assert.equal(d.gateReason, undefined);
++    // exactly the C0 formula, unchanged
++    const expected = modulateLogits(d.zBase, d.A_norm, {
++      beta: DEFAULT_JITRL_HYPERPARAMS.beta,
++      zMin: DEFAULT_JITRL_HYPERPARAMS.zMin,
++    });
++    assert.deepEqual(d.zMod, expected);
++    assert.notDeepEqual(d.zMod, d.zBase);
++  }
++});
++
++test("engine: empty memory is pure baseline (no_neighbors gate)", () => {
++  const d = learnedEngine({ n: 0 }).decide(MSG, LOGITS);
++  assert.equal(d.nRetrieved, 0);
++  assert.equal(d.modulationActive, false);
++  assert.equal(d.gateReason, "no_neighbors");
++  assert.deepEqual(d.zMod, d.zBase);
++  assert.deepEqual(d.A_norm, ZEROS);
++  assert.equal(d.chosenTier, d.baseChoice);
++  assert.equal(d.flipped, false);
++});
++
++test("engine: C1 gate suppresses modulation below min_neighbors", () => {
++  const d = learnedEngine({ n: 2, minNeighbors: 3 }).decide(MSG, LOGITS);
++  assert.equal(d.nRetrieved, 2);
++  assert.equal(d.minNeighbors, 3);
++  assert.equal(d.modulationActive, false);
++  assert.equal(d.gateReason, "below_min_neighbors");
++  assert.deepEqual(d.zMod, d.zBase);
++  assert.deepEqual(d.A_norm, ZEROS);
++  assert.equal(d.chosenTier, d.baseChoice);
++  assert.equal(d.flipped, false);
++});
++
++test("engine: gate does not perturb the RNG stream (estimateValues always runs)", () => {
++  let draws = 0;
++  const makeCountingRng = () => () => {
++    draws += 1;
++    return 0.99;
++  };
++  draws = 0;
++  learnedEngine({ n: 2, rng: makeCountingRng() }).decide(MSG, LOGITS);
++  const drawsC0 = draws;
++  draws = 0;
++  learnedEngine({ n: 2, minNeighbors: 3, rng: makeCountingRng() }).decide(MSG, LOGITS);
++  const drawsC1 = draws;
++  assert.equal(drawsC0, drawsC1);
++  assert.ok(drawsC0 > 0);
++});
++
++test("engine: modulated choice can flip from the base choice", () => {
++  // 3 medium episodes with negative reward: A_norm(medium)=0 but the unseen
++  // tiers gain positive advantage -> the argmax flips away from medium.
++  const d = learnedEngine({ n: 3, reward: -0.3, rng: () => 0.99 }).decide(MSG, LOGITS);
++  assert.equal(d.baseChoice, "medium");
++  assert.equal(d.chosenTier, "simple");
++  assert.equal(d.flipped, true);
++});
++
++test("engine: learn stores canonical sorted entries; updateFromMessage matches", () => {
++  const engine = new JitRLEngine();
++  const stored = engine.learn({
++    intent: "data_analysis",
++    signatureTokens: ["b", "a", "b"],
++    tier: "medium",
++    reward: 0.42,
++    episodeId: "e1",
++    ts: 123.0,
++  });
++  assert.deepEqual(stored.signature_tokens, ["a", "b", "b"]);
++  assert.equal(stored.G, 0.42);
++  assert.equal(stored.tier, "medium");
++  assert.equal(stored.ts, 123.0);
++
++  const viaMessage = engine.updateFromMessage("继续", "simple", 0.1, "e2", 5.0);
++  assert.equal(viaMessage.intent_class, "continuation");
++  assert.deepEqual(viaMessage.signature_tokens, taskSignature("继续"));
++  assert.equal(engine.memory.length, 2);
++});
+diff --git a/tests/router/jitrl/judge.test.ts b/tests/router/jitrl/judge.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4505f95f66f5c13539d724fa76753c431f97a79e
+--- /dev/null
++++ b/tests/router/jitrl/judge.test.ts
+@@ -0,0 +1,125 @@
++/**
++ * JitRL judge client: Method-B-equivalent four scoring requests through the
++ * injected ModelRuntime, score->logit conversion, and the deterministic
++ * fallback (no judge configured / request failure / unparsable reply).
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++
++import type {
++  CanonicalModelRequest,
++  CanonicalModelResponse,
++  ModelRuntime,
++} from "../../../src/model/index.js";
++import { JitRLJudgeClient, scoreToLogit } from "../../../src/router/jitrl/judge.js";
++import { TIERS } from "../../../src/router/jitrl/tiers.js";
++
++function ref(providerSlashModel: string) {
++  const [provider, model] = providerSlashModel.split("/");
++  return { id: providerSlashModel, provider: provider!, model: model! };
++}
++
++const JUDGE = ref("test/judge-model");
++
++function fakeCompleteRuntime(handler: (request: CanonicalModelRequest) => CanonicalModelResponse | Promise<CanonicalModelResponse>): ModelRuntime {
++  return {
++    complete: (request) => Promise.resolve(handler(request)),
++    stream: function* () {
++      // judges never stream
++    } as never,
++    getCapabilities: () => ({ maxOutputTokens: 4096 }) as never,
++    getMultimodal: () => ({ supportedInputs: ["text"] }) as never,
++    getProviderProtocol: () => "openai",
++    getProviderBaseUrl: () => undefined,
++  };
++}
++
++test("scoreToLogit: symmetric midpoint-bin logits", () => {
++  assert.ok(Math.abs(scoreToLogit(5)) < 1e-12);
++  assert.ok(Math.abs(scoreToLogit(10) - Math.log(21)) < 1e-12);
++  assert.ok(Math.abs(scoreToLogit(0) + Math.log(21)) < 1e-12);
++  assert.ok(scoreToLogit(10) > scoreToLogit(7));
++  // out-of-range scores are clamped, not rejected
++  assert.equal(scoreToLogit(99), scoreToLogit(10));
++});
++
++test("judge: four parallel tier-scoring requests produce a full logit vector", async () => {
++  const prompts: string[] = [];
++  const runtime = fakeCompleteRuntime((request) => {
++    const prompt = request.messages[0]!.content.map((b) => (b.type === "text" ? b.text : "")).join("");
++    prompts.push(prompt);
++    const tier = /"([a-z]+)"/.exec(prompt)?.[1] ?? "medium";
++    return {
++      role: "assistant",
++      content: [{ type: "text", text: tier === "reasoning" ? "10" : "2" }],
++      finishReason: "stop",
++    } as CanonicalModelResponse;
++  });
++
++  const client = new JitRLJudgeClient({ judgeRuntime: runtime, judge: JUDGE, timeoutMs: 1000 });
++  const result = await client.judge({ userMessage: "分析这批销售数据并写总结报告" });
++
++  assert.equal(result.source, "model");
++  assert.equal(prompts.length, 4);
++  for (const tier of TIERS) {
++    assert.ok(prompts.some((prompt) => prompt.includes(`"${tier}"`)));
++    assert.ok(Number.isFinite(result.tierLogits[tier]));
++  }
++  assert.equal(result.chosenTier, "reasoning");
++  assert.ok(result.tierLogits.reasoning! > result.tierLogits.simple!);
++  assert.equal(result.rawOutput, "<tier>reasoning</tier>");
++});
++
++test("judge: any per-tier failure degrades to the deterministic fallback", async () => {
++  let calls = 0;
++  const runtime = fakeCompleteRuntime(() => {
++    calls += 1;
++    if (calls === 3) {
++      throw new Error("judge hiccup");
++    }
++    return { role: "assistant" as const, content: [{ type: "text" as const, text: "5" }], finishReason: "stop" as const };
++  });
++
++  const client = new JitRLJudgeClient({ judgeRuntime: runtime, judge: JUDGE, timeoutMs: 1000 });
++  const result = await client.judge({ userMessage: "分析这批销售数据并写总结报告" });
++
++  assert.equal(result.source, "fallback");
++  assert.equal(calls, 4);
++  for (const tier of TIERS) {
++    assert.ok(Number.isFinite(result.tierLogits[tier]));
++  }
++  assert.ok(result.fallbackReason);
++});
++
++test("judge: unparsable reply also falls back", async () => {
++  const runtime = fakeCompleteRuntime(() => ({
++    role: "assistant",
++    content: [{ type: "text", text: "I think medium fits well here" }],
++    finishReason: "stop",
++  }));
++  const client = new JitRLJudgeClient({ judgeRuntime: runtime, judge: JUDGE, timeoutMs: 1000 });
++  const result = await client.judge({ userMessage: "hello" });
++  assert.equal(result.source, "fallback");
++});
++
++test("judge: no judge configured -> deterministic fallback, reproducible", async () => {
++  const clientA = new JitRLJudgeClient({ fallbackSeed: 7 });
++  const clientB = new JitRLJudgeClient({ fallbackSeed: 7 });
++  const message = "给下面这个函数写一个单元测试：\ndef add(a, b):\n    return a+b";
++  const a = await clientA.judge({ userMessage: message });
++  const b = await clientB.judge({ userMessage: message });
++  assert.equal(a.source, "fallback");
++  assert.equal(a.fallbackReason, "no judge model configured");
++  assert.deepEqual(a, b);
++
++  // Code cues ("def ") mass the complex tier in the fallback heuristic.
++  assert.equal(a.chosenTier, "complex");
++  assert.ok(a.tierLogits.complex! > a.tierLogits.medium!);
++});
++
++test("judge: fallback continuation echo keeps the previous tier", async () => {
++  const client = new JitRLJudgeClient({ fallbackSeed: 42 });
++  const result = await client.judge({ userMessage: "继续", previousTier: "reasoning" });
++  assert.equal(result.chosenTier, "reasoning");
++  assert.ok(result.tierLogits.reasoning! > result.tierLogits.simple!);
++});
+diff --git a/tests/router/jitrl/memoryStore.test.ts b/tests/router/jitrl/memoryStore.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f364ecadc5dedfa0a8facb85ee1bd4d3e8a6e25
+--- /dev/null
++++ b/tests/router/jitrl/memoryStore.test.ts
+@@ -0,0 +1,161 @@
++/**
++ * JitRL memory persistence: atomic writes, throttled flush, cap eviction on
++ * disk, and the process-wide shared state cache that survives
++ * `lookupRouter()` instance churn.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import * as fs from "node:fs";
++import * as os from "node:os";
++import * as path from "node:path";
++
++import { JitRLMemoryStore, getSharedJitRLState, resetSharedJitRLStates } from "../../../src/router/jitrl/memoryStore.js";
++import { taskSignature } from "../../../src/router/jitrl/state.js";
++import type { JitRLEpisode } from "../../../src/router/jitrl/memory.js";
++
++function tmpDir(): string {
++  return fs.mkdtempSync(path.join(os.tmpdir(), "jitrl-memory-"));
++}
++
++function episode(tier: string, g: number, id: string | number): JitRLEpisode {
++  return {
++    intent_class: "data_analysis",
++    signature_tokens: ["a", "b"],
++    tier,
++    G: g,
++    ts: 1.0,
++    episode_id: id,
++  };
++}
++
++test("store: saveSync + load round trip (atomic, no leftover tmp files)", () => {
++  const dir = tmpDir();
++  const filePath = path.join(dir, "router", "jitrl-memory.json");
++  const store = new JitRLMemoryStore(filePath);
++  store.saveSync([episode("medium", 0.42, "e1"), episode("simple", 0.1, 2)]);
++
++  const loaded = store.load();
++  assert.equal(loaded.length, 2);
++  assert.deepEqual(loaded[0], { intent_class: "data_analysis", signature_tokens: ["a", "b"], tier: "medium", G: 0.42, ts: 1.0, episode_id: "e1" });
++
++  const leftovers = fs.readdirSync(path.dirname(filePath)).filter((name) => name.includes(".tmp-"));
++  assert.deepEqual(leftovers, []);
++
++  const payload = JSON.parse(fs.readFileSync(filePath, "utf8"));
++  assert.equal(payload.version, 1);
++  assert.equal(payload.entries.length, 2);
++});
++
++test("store: load tolerates missing/corrupt files", () => {
++  const dir = tmpDir();
++  const store = new JitRLMemoryStore(path.join(dir, "missing.json"));
++  assert.deepEqual(store.load(), []);
++
++  const corrupt = path.join(dir, "corrupt.json");
++  fs.writeFileSync(corrupt, "{not json", "utf8");
++  assert.deepEqual(new JitRLMemoryStore(corrupt).load(), []);
++
++  const badShape = path.join(dir, "bad.json");
++  fs.writeFileSync(badShape, JSON.stringify({ version: 1, entries: [{ nope: true }] }), "utf8");
++  assert.deepEqual(new JitRLMemoryStore(badShape).load(), []);
++});
++
++test("store: throttled flush coalesces bursty saves", async () => {
++  const dir = tmpDir();
++  const filePath = path.join(dir, "jitrl-memory.json");
++  const store = new JitRLMemoryStore(filePath);
++
++  let writes = 0;
++  const originalSave = store.saveSync.bind(store);
++  (store as unknown as { saveSync: (entries: JitRLEpisode[]) => void }).saveSync = (entries) => {
++    writes += 1;
++    originalSave(entries);
++  };
++
++  const entriesA = [episode("medium", 0.1, 1)];
++  const entriesB = [episode("medium", 0.1, 1), episode("simple", 0.2, 2)];
++  store.scheduleFlush(() => entriesA, 50);
++  store.scheduleFlush(() => entriesB, 50);
++  await new Promise((resolve) => setTimeout(resolve, 150));
++
++  assert.equal(writes, 1);
++  assert.equal(store.load().length, 2);
++});
++
++test("store: flushNow writes pending entries immediately", () => {
++  const dir = tmpDir();
++  const store = new JitRLMemoryStore(path.join(dir, "jitrl-memory.json"));
++  store.flushNow(() => [episode("reasoning", 0.9, "r1")]);
++  assert.equal(store.load().length, 1);
++  assert.equal(store.load()[0]!.tier, "reasoning");
++});
++
++test("shared state: identical instances across lookupRouter-style churn", () => {
++  const dir = tmpDir();
++  const memoryPath = path.join(dir, "jitrl-memory.json");
++  try {
++    const first = getSharedJitRLState({ memoryPath });
++    const second = getSharedJitRLState({ memoryPath });
++    assert.equal(second, first);
++
++    // Simulate PluginRuntime.lookupRouter() building a fresh custom router
++    // per decide: the engine instance must be the shared one.
++    first.engine.updateFromMessage("分析这批销售数据，统计环比", "medium", 0.5, "e1", 1);
++    assert.equal(second.memory.length, 1);
++    assert.equal(second.engine, first.engine);
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
++
++test("shared state: persists across resets and enforces cap on disk", () => {
++  const dir = tmpDir();
++  const memoryPath = path.join(dir, "jitrl-memory.json");
++  try {
++    const state = getSharedJitRLState({ memoryPath, hyperparams: { memoryCap: 5 } });
++    for (let i = 0; i < 8; i += 1) {
++      state.engine.updateFromMessage("分析这批销售数据，统计环比", "medium", 0.1 * i, `e${i}`, i);
++    }
++    assert.equal(state.memory.length, 5);
++    state.store.flushNow(() => state.memory.entries());
++    assert.equal(new JitRLMemoryStore(memoryPath).load().length, 5);
++
++    // A fresh shared state (post-reset) reloads the persisted 5 entries.
++    resetSharedJitRLStates();
++    const reloaded = getSharedJitRLState({ memoryPath, hyperparams: { memoryCap: 5 } });
++    assert.equal(reloaded.memory.length, 5);
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
++
++test("shared state: hyperparameter change rebuilds the engine but keeps episodes", () => {
++  const dir = tmpDir();
++  const memoryPath = path.join(dir, "jitrl-memory.json");
++  try {
++    const state = getSharedJitRLState({ memoryPath, hyperparams: { minNeighbors: 1 } });
++    state.engine.updateFromMessage("分析这批销售数据，统计环比", "medium", 0.5, "e1", 1);
++    const tuned = getSharedJitRLState({ memoryPath, hyperparams: { minNeighbors: 3, beta: 2 } });
++    assert.notEqual(tuned.engine, state.engine);
++    assert.equal(tuned.memory.length, 1);
++    assert.equal(tuned.hyperparams.minNeighbors, 3);
++    assert.equal(tuned.hyperparams.beta, 2);
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
++
++test("learned episodes use canonical signature tokens", () => {
++  const dir = tmpDir();
++  const memoryPath = path.join(dir, "jitrl-memory.json");
++  try {
++    const state = getSharedJitRLState({ memoryPath });
++    const message = "给下面这个函数写一个单元测试：\ndef add(a, b):\n    return a+b";
++    state.engine.updateFromMessage(message, "medium", 0.7, "e-canonical", 1);
++    const stored = state.memory.entries()[0]!;
++    assert.equal(stored.intent_class, "code_gen");
++    assert.deepEqual(stored.signature_tokens, [...taskSignature(message)].sort());
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
+diff --git a/tests/router/jitrl/plugin.test.ts b/tests/router/jitrl/plugin.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa2512cea617a7dd61a0c23948cff6a4599e95d6
+--- /dev/null
++++ b/tests/router/jitrl/plugin.test.ts
+@@ -0,0 +1,70 @@
++/**
++ * Builtin `jitrl` plugin registration: programmatic RouterContribution
++ * survives the manifest scan AND the PluginRuntime disk reload.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import * as fs from "node:fs";
++import * as os from "node:os";
++import * as path from "node:path";
++
++import { loadBuiltinPlugins } from "../../../src/extension/plugins/builtin/loadBuiltinPlugins.js";
++import { PluginRuntime } from "../../../src/extension/plugins/runtime/PluginRuntime.js";
++import { createJitrlCustomRouter, JITRL_ROUTER_ID } from "../../../src/router/jitrl/router.js";
++
++function tmpDir(): string {
++  return fs.mkdtempSync(path.join(os.tmpdir(), "jitrl-plugin-"));
++}
++
++test("builtin scan: jitrl plugin carries a programmatic RouterContribution", () => {
++  const plugins = loadBuiltinPlugins();
++  const jitrl = plugins.find((plugin) => plugin.name === "jitrl");
++  assert.ok(jitrl, "builtin jitrl plugin not found");
++  assert.equal(jitrl.source, "builtin");
++  assert.ok(jitrl.routerContributions?.length);
++  const contribution = jitrl.routerContributions!.find((c) => c.id === JITRL_ROUTER_ID);
++  assert.ok(contribution);
++  assert.equal(contribution.id, "jitrl");
++  const router = contribution.createCustomRouter();
++  assert.equal(router.id, JITRL_ROUTER_ID);
++  assert.equal(typeof router.decide, "function");
++  assert.equal(typeof router.onTurnOutcome, "function");
++});
++
++test("PluginRuntime.lookupRouter resolves the builtin jitrl router", async () => {
++  const runtime = new PluginRuntime({
++    projectRoot: tmpDir(),
++    pilotHome: tmpDir(),
++    builtinPlugins: loadBuiltinPlugins(),
++  });
++  // The registry populates on refresh (mirrors createLocalGateway startup).
++  await runtime.refresh();
++  const router = runtime.lookupRouter("jitrl");
++  assert.ok(router);
++  assert.equal(router.id, "jitrl");
++  const unknown = runtime.lookupRouter("does-not-exist");
++  assert.equal(unknown, undefined);
++});
++
++test("PluginRuntime.refresh preserves programmatic contributions after disk reload", async () => {
++  const runtime = new PluginRuntime({
++    projectRoot: tmpDir(),
++    pilotHome: tmpDir(),
++    builtinPlugins: loadBuiltinPlugins(),
++  });
++  await runtime.refresh();
++  const router = runtime.lookupRouter("jitrl");
++  assert.ok(router, "RouterContribution lost after refresh()");
++  assert.equal(router.id, "jitrl");
++
++  const snapshot = runtime.snapshot();
++  const jitrl = snapshot.find((plugin) => plugin.name === "jitrl");
++  assert.ok(jitrl?.routerContributions?.some((c) => c.id === JITRL_ROUTER_ID));
++});
++
++test("createJitrlCustomRouter returns a fresh instance per call but shared state is stable", async () => {
++  const a = createJitrlCustomRouter();
++  const b = createJitrlCustomRouter();
++  assert.notEqual(a, b);
++  assert.equal(a.id, b.id);
++});
+diff --git a/tests/router/jitrl/reward.test.ts b/tests/router/jitrl/reward.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..08becbc349e574d8d978c883f316690b79b7f73b
+--- /dev/null
++++ b/tests/router/jitrl/reward.test.ts
+@@ -0,0 +1,140 @@
++/**
++ * JitRL reward: costSaving normalization against the most expensive
++ * candidate in the same candidate set, and the evaluator quality gate.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++
++import type {
++  CanonicalModelRequest,
++  CanonicalModelResponse,
++  ModelRuntime,
++} from "../../../src/model/index.js";
++import {
++  computeCostSaving,
++  computeJitRLReward,
++  episodePrice,
++  evaluateQuality,
++} from "../../../src/router/jitrl/reward.js";
++
++const PRICING = {
++  "test/cheap": { input: 1, output: 1 },
++  "test/mid": { input: 3, output: 3 },
++  "test/exp": { input: 10, output: 10 },
++};
++
++function ref(providerSlashModel: string) {
++  const [provider, model] = providerSlashModel.split("/");
++  return { id: providerSlashModel, provider: provider!, model: model! };
++}
++
++const CANDIDATES = [ref("test/cheap"), ref("test/mid"), ref("test/exp")];
++
++test("episodePrice: (in * priceIn + out * priceOut) / 1e6", () => {
++  assert.ok(Math.abs(episodePrice("test", "exp", 100, 50, PRICING) - (100 * 10 + 50 * 10) / 1e6) < 1e-12);
++});
++
++test("costSaving: normalized against the most expensive candidate, clamped to [0,1]", () => {
++  const saving = computeCostSaving(
++    { chosenModel: ref("test/cheap"), candidates: CANDIDATES, usage: { inputTokens: 100, outputTokens: 50 } },
++    PRICING,
++  );
++  // most expensive = test/exp (1500), chosen = test/cheap (150) -> 0.9
++  assert.ok(Math.abs(saving - 0.9) < 1e-9);
++  assert.ok(saving >= 0 && saving <= 1);
++
++  // Choosing the most expensive candidate saves nothing.
++  const zero = computeCostSaving(
++    { chosenModel: ref("test/exp"), candidates: CANDIDATES, usage: { inputTokens: 100, outputTokens: 50 } },
++    PRICING,
++  );
++  assert.equal(zero, 0);
++});
++
++test("costSaving: identical pricing -> 0; fallback token profile without usage", () => {
++  const same = computeCostSaving(
++    { chosenModel: ref("test/mid"), candidates: [ref("test/mid")], usage: undefined },
++    PRICING,
++  );
++  assert.equal(same, 0);
++
++  // No usage -> the documented 1500/800 episode profile is used.
++  const withProfile = computeCostSaving(
++    { chosenModel: ref("test/cheap"), candidates: CANDIDATES, usage: undefined },
++    PRICING,
++  );
++  const expected = (1500 * 10 + 800 * 10 - (1500 * 1 + 800 * 1)) / (1500 * 10 + 800 * 10);
++  assert.ok(Math.abs(withProfile - expected) < 1e-9);
++});
++
++function fakeEvaluatorRuntime(text: string | Error): ModelRuntime {
++  return {
++    complete: () =>
++      text instanceof Error ? Promise.reject(text) : Promise.resolve({
++        role: "assistant",
++        content: [{ type: "text", text }],
++        finishReason: "stop",
++      } as CanonicalModelResponse),
++    stream: function* () {} as never,
++    getCapabilities: () => ({ maxOutputTokens: 4096 }) as never,
++    getMultimodal: () => ({ supportedInputs: ["text"] }) as never,
++    getProviderProtocol: () => "openai",
++    getProviderBaseUrl: () => undefined,
++  };
++}
++
++const EVALUATOR = ref("test/eval-model");
++
++test("evaluateQuality: parses 0-10 scores into [0,1]", async () => {
++  assert.equal(await evaluateQuality({ userMessage: "q", responseText: "r" }, {
++    evaluatorRuntime: fakeEvaluatorRuntime("8"),
++    evaluator: EVALUATOR,
++  }), 0.8);
++  assert.equal(await evaluateQuality({ userMessage: "q", responseText: "r" }, {
++    evaluatorRuntime: fakeEvaluatorRuntime(" 7 \n"),
++    evaluator: EVALUATOR,
++  }), 0.7);
++  // Out-of-range or unparsable -> undefined (no learning).
++  assert.equal(await evaluateQuality({ userMessage: "q", responseText: "r" }, {
++    evaluatorRuntime: fakeEvaluatorRuntime("11"),
++    evaluator: EVALUATOR,
++  }), undefined);
++  assert.equal(await evaluateQuality({ userMessage: "q", responseText: "r" }, {
++    evaluatorRuntime: fakeEvaluatorRuntime("great"),
++    evaluator: EVALUATOR,
++  }), undefined);
++  // Request failure -> undefined.
++  assert.equal(await evaluateQuality({ userMessage: "q", responseText: "r" }, {
++    evaluatorRuntime: fakeEvaluatorRuntime(new Error("boom")),
++    evaluator: EVALUATOR,
++  }), undefined);
++  // No evaluator configured -> undefined.
++  assert.equal(await evaluateQuality({ userMessage: "q", responseText: "r" }, {}), undefined);
++});
++
++test("computeJitRLReward: 0.6*quality + 0.3*costSaving; evaluator failure -> undefined", async () => {
++  const input = {
++    userMessage: "分析数据",
++    responseText: "答案",
++    chosenTier: "simple",
++    chosenModel: ref("test/cheap"),
++    candidates: CANDIDATES,
++    usage: { inputTokens: 100, outputTokens: 50 },
++  };
++  const reward = await computeJitRLReward(input, {
++    evaluatorRuntime: fakeEvaluatorRuntime("8"),
++    evaluator: EVALUATOR,
++    modelPricing: PRICING,
++  });
++  assert.ok(reward);
++  assert.ok(Math.abs(reward.quality - 0.8) < 1e-12);
++  assert.ok(Math.abs(reward.costSaving - 0.9) < 1e-9);
++  assert.ok(Math.abs(reward.reward - (0.6 * 0.8 + 0.3 * 0.9)) < 1e-9);
++
++  const failed = await computeJitRLReward(input, {
++    evaluatorRuntime: fakeEvaluatorRuntime(new Error("evaluator down")),
++    evaluator: EVALUATOR,
++    modelPricing: PRICING,
++  });
++  assert.equal(failed, undefined);
++});
+diff --git a/tests/router/jitrl/routerOutcome.test.ts b/tests/router/jitrl/routerOutcome.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5548f6d4326d13f7cec2ae772538f013582cdb7c
+--- /dev/null
++++ b/tests/router/jitrl/routerOutcome.test.ts
+@@ -0,0 +1,299 @@
++/**
++ * End-to-end JitRL custom-router integration through the official
++ * RouterRuntime surface:
++ *   - decide() routes via the jitrl contribution (4-tier judge -> engine ->
++ *     tier candidate model), never recursing through the Router for judge
++ *     requests;
++ *   - onTurnOutcome fires after custom-routed execution (success AND
++ *     failure) with session/turn/user message/decision/usage/response/error;
++ *   - successful turns learn (reward = 0.6*quality + 0.3*costSaving);
++ *   - evaluator failures and execution failures write NO memory.
++ */
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import * as fs from "node:fs";
++import * as os from "node:os";
++import * as path from "node:path";
++
++import type {
++  CanonicalModelEvent,
++  CanonicalModelRequest,
++  CanonicalModelResponse,
++  ModelRuntime,
++} from "../../../src/model/index.js";
++import { createRouterRuntime } from "../../../src/router/RouterRuntime.js";
++import type { RouterConfig, RouterModelRef } from "../../../src/router/config/schema.js";
++import type { CustomRouterTurnOutcome } from "../../../src/router/customRouter/customRouter.js";
++import { createJitrlCustomRouter } from "../../../src/router/jitrl/router.js";
++import { getSharedJitRLState, resetSharedJitRLStates } from "../../../src/router/jitrl/memoryStore.js";
++
++function ref(providerSlashModel: string): RouterModelRef {
++  const [provider, model] = providerSlashModel.split("/");
++  return { id: providerSlashModel, provider: provider!, model: model! };
++}
++
++function userRequest(text: string): CanonicalModelRequest {
++  return {
++    provider: "test",
++    model: "gpt-4o",
++    messages: [{ role: "user", content: [{ type: "text", text }] }],
++    stream: true,
++  };
++}
++
++type FakeBehavior = {
++  judgeScores?: (tier: string) => number | undefined;
++  evaluatorScore?: string;
++  failJudge?: boolean;
++  failEvaluator?: boolean;
++  failStream?: boolean;
++};
++
++function makeFakeRuntime(behavior: FakeBehavior) {
++  const calls = { complete: [] as Array<{ provider: string; model: string; prompt: string }>, stream: 0 };
++  const runtime: ModelRuntime = {
++    async complete(request: CanonicalModelRequest): Promise<CanonicalModelResponse> {
++      const prompt = request.messages[0]?.content
++        ?.map((block) => (block.type === "text" ? block.text : ""))
++        .join("") ?? "";
++      calls.complete.push({ provider: request.provider, model: request.model, prompt });
++      if (request.model === "judge-model") {
++        if (behavior.failJudge) {
++          throw new Error("judge down");
++        }
++        const tierMatch = /"([a-z]+)"/.exec(prompt);
++        const tier = tierMatch?.[1] ?? "medium";
++        const score = behavior.judgeScores?.(tier) ?? (tier === "medium" ? 9 : 2);
++        return {
++          role: "assistant",
++          content: [{ type: "text", text: String(score) }],
++          finishReason: "stop",
++        };
++      }
++      if (request.model === "eval-model") {
++        if (behavior.failEvaluator) {
++          throw new Error("evaluator down");
++        }
++        return {
++          role: "assistant",
++          content: [{ type: "text", text: behavior.evaluatorScore ?? "8" }],
++          finishReason: "stop",
++        };
++      }
++      throw new Error(`unexpected complete() model ${request.model}`);
++    },
++    async *stream(request: CanonicalModelRequest): AsyncGenerator<CanonicalModelEvent> {
++      calls.stream += 1;
++      if (behavior.failStream) {
++        yield {
++          type: "error",
++          error: {
++            provider: request.provider,
++            protocol: "openai",
++            code: "server_error",
++            message: "model exploded",
++            retryable: false,
++          },
++        };
++        return;
++      }
++      yield { type: "message_start", role: "assistant" };
++      yield { type: "text_delta", text: "The analysis is done." };
++      yield { type: "message_end", finishReason: "stop" };
++      yield { type: "usage", usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 } };
++    },
++    getCapabilities: () => ({ maxOutputTokens: 4096 }) as never,
++    getMultimodal: () => ({ supportedInputs: ["text"] }) as never,
++    getProviderProtocol: () => "openai",
++    getProviderBaseUrl: () => undefined,
++  };
++  return { runtime, calls };
++}
++
++function buildConfig(memoryPath: string): RouterConfig {
++  return {
++    enabled: true,
++    scenarios: { default: ref("test/gpt-4o") },
++    customRouter: {
++      extensionId: "jitrl",
++      judge: ref("test/judge-model"),
++      evaluator: ref("test/eval-model"),
++      tiers: {
++        simple: ref("test/gpt-4o-mini"),
++        medium: ref("test/gpt-4o"),
++        complex: ref("test/claude-opus"),
++        reasoning: ref("test/claude-opus"),
++      },
++      memoryPath,
++    },
++  };
++}
++
++function spyRegistry(captured: CustomRouterTurnOutcome[]) {
++  const jitrl = createJitrlCustomRouter();
++  const learn = jitrl.onTurnOutcome?.bind(jitrl);
++  return {
++    lookupRouter: () => ({
++      ...jitrl,
++      onTurnOutcome: async (outcome: CustomRouterTurnOutcome) => {
++        captured.push(outcome);
++        await learn?.(outcome);
++      },
++    }),
++  };
++}
++
++async function collectEvents(iterable: AsyncIterable<CanonicalModelEvent>): Promise<CanonicalModelEvent[]> {
++  const events: CanonicalModelEvent[] = [];
++  for await (const event of iterable) {
++    events.push(event);
++  }
++  return events;
++}
++
++const USER_MESSAGE = "分析下面这组销售数据，统计环比，对比渠道表现";
++
++async function runTurn(
++  options: { behavior: FakeBehavior; memoryPath: string },
++): Promise<{
++  decision: Awaited<ReturnType<ReturnType<typeof createRouterRuntime>["decide"]>>;
++  events: CanonicalModelEvent[];
++  captured: CustomRouterTurnOutcome[];
++  calls: { complete: Array<{ provider: string; model: string; prompt: string }>; stream: number };
++}> {
++  const { runtime, calls } = makeFakeRuntime(options.behavior);
++  const captured: CustomRouterTurnOutcome[] = [];
++  const routerRuntime = createRouterRuntime(buildConfig(options.memoryPath), {
++    modelRuntime: runtime,
++    customRouterRegistry: spyRegistry(captured),
++  });
++  const request = userRequest(USER_MESSAGE);
++  const decision = await routerRuntime.decide({
++    request,
++    sessionId: "session-1",
++    isMainAgent: true,
++  });
++  const events = await collectEvents(
++    routerRuntime.execute(decision, request, { sessionId: "session-1", turnId: "turn-1" }),
++  );
++  await routerRuntime.shutdown();
++  return { decision, events, captured, calls };
++}
++
++test("custom routing: judge scores -> engine -> tier candidate, no Router recursion", async () => {
++  const memoryPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "jitrl-e2e-")), "memory.json");
++  try {
++    const { decision, calls } = await runTurn({ behavior: {}, memoryPath });
++    assert.equal(decision.resolvedFrom, "custom");
++    assert.equal(decision.provider, "test");
++    assert.equal(decision.model, "gpt-4o");
++    assert.equal(decision.tokenSaverTier, "medium");
++
++    // Four tier-scoring judge requests, all through ModelRuntime.complete.
++    const judgeCalls = calls.complete.filter((call) => call.model === "judge-model");
++    assert.equal(judgeCalls.length, 4);
++    for (const tier of ["simple", "medium", "complex", "reasoning"]) {
++      assert.ok(judgeCalls.some((call) => call.prompt.includes(`"${tier}"`)), `missing judge prompt for ${tier}`);
++    }
++    // The routed completion went through stream() — exactly once.
++    assert.equal(calls.stream, 1);
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
++
++test("successful turn: onTurnOutcome fires and learns reward = 0.6*quality + 0.3*costSaving", async () => {
++  const memoryPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "jitrl-e2e-")), "memory.json");
++  try {
++    const { events, captured } = await runTurn({ behavior: {}, memoryPath });
++    assert.ok(events.some((event) => event.type === "text_delta"));
++
++    assert.equal(captured.length, 1);
++    const outcome = captured[0]!;
++    assert.equal(outcome.sessionId, "session-1");
++    assert.equal(outcome.turnId, "turn-1");
++    assert.equal(outcome.userMessage, USER_MESSAGE);
++    assert.equal(outcome.decision.tokenSaverTier, "medium");
++    assert.equal(outcome.error, undefined);
++    assert.equal(outcome.response, "The analysis is done.");
++    assert.equal(outcome.usage?.inputTokens, 100);
++    assert.equal(outcome.usage?.outputTokens, 50);
++
++    const shared = getSharedJitRLState({ memoryPath });
++    assert.equal(shared.memory.length, 1);
++    const episode = shared.memory.entries()[0]!;
++    assert.equal(episode.tier, "medium");
++    assert.equal(episode.intent_class, "data_analysis");
++    assert.ok(episode.signature_tokens.length > 0);
++
++    // quality = 8/10 = 0.8; candidates priced (1500*in + 800*out profile
++    // replaced by observed usage 100/50): most expensive = claude-opus
++    // (15, 75), chosen = gpt-4o (2.5, 10) -> costSaving = 4500/5250.
++    const quality = 0.8;
++    const costSaving = (100 * 15 + 50 * 75 - (100 * 2.5 + 50 * 10)) / (100 * 15 + 50 * 75);
++    const expected = 0.6 * quality + 0.3 * costSaving;
++    assert.ok(Math.abs(episode.G - expected) < 1e-9, `G=${episode.G} expected=${expected}`);
++
++    // Persisted to disk.
++    shared.store.flushNow(() => shared.memory.entries());
++    const persisted = JSON.parse(fs.readFileSync(memoryPath, "utf8"));
++    assert.equal(persisted.entries.length, 1);
++    assert.equal(persisted.entries[0].tier, "medium");
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
++
++test("evaluator failure: outcome fires but memory is NOT written", async () => {
++  const memoryPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "jitrl-e2e-")), "memory.json");
++  try {
++    const { captured } = await runTurn({ behavior: { failEvaluator: true }, memoryPath });
++    assert.equal(captured.length, 1);
++    assert.equal(captured[0]!.decision.tokenSaverTier, "medium");
++    const shared = getSharedJitRLState({ memoryPath });
++    assert.equal(shared.memory.length, 0);
++    assert.equal(fs.existsSync(memoryPath), false);
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
++
++test("execution failure: onTurnOutcome fires with the error, no memory write", async () => {
++  const memoryPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "jitrl-e2e-")), "memory.json");
++  try {
++    const { events, captured } = await runTurn({ behavior: { failStream: true }, memoryPath });
++    assert.ok(events.some((event) => event.type === "error"));
++
++    assert.equal(captured.length, 1);
++    const outcome = captured[0]!;
++    assert.equal(outcome.error?.code, "server_error");
++    assert.equal(outcome.decision.tokenSaverTier, "medium");
++
++    const shared = getSharedJitRLState({ memoryPath });
++    assert.equal(shared.memory.length, 0);
++  } finally {
++    resetSharedJitRLStates();
++  }
++});
++
++test("judge failure: deterministic fallback still yields a 4-tier decision", async () => {
++  const memoryPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "jitrl-e2e-")), "memory.json");
++  try {
++    const { decision, calls } = await runTurn({
++      behavior: {
++        failJudge: true,
++        // no evaluator either -> no memory write, but routing must succeed
++      },
++      memoryPath,
++    });
++    assert.equal(decision.resolvedFrom, "custom");
++    // The deterministic fallback judge has no cue for this data-analysis
++    // message, so its systematic medium bias wins -> gpt-4o candidate.
++    assert.equal(decision.tokenSaverTier, "medium");
++    assert.equal(decision.model, "gpt-4o");
++    const judgeCalls = calls.complete.filter((call) => call.model === "judge-model");
++    assert.equal(judgeCalls.length, 4);
++  } finally {
++    resetSharedJitRLStates();
++  }
++});

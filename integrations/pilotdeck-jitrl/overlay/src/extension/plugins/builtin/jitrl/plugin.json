@@ -1,0 +1,5 @@
+{
+  "name": "jitrl",
+  "version": "0.1.0",
+  "description": "JitRL test-time RL custom router: 4-tier judge logits modulated by top-k Jaccard experience memory"
+}
