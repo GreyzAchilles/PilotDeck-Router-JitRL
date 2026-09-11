@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JitRL Router · Web Demo</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">JitRL</span>
+      <div class="brand-text">
+        <h1>Router 优化 · Web Demo</h1>
+        <p>纯标准库 harness · 忠实复刻 Router 决策路径 · 冻结口径实验数据</p>
+      </div>
+    </div>
+    <div class="top-status">
+      <span id="modeBadge" class="badge badge-off">OFFLINE</span>
+      <span class="dot-item"><span id="dotJudge" class="dot dot-off"></span>llama Judge</span>
+      <span class="dot-item"><span id="dotCpa" class="dot dot-off"></span>CPA</span>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="offline">实验数据（离线）</button>
+    <button class="tab" data-tab="online">实时决策（在线）</button>
+  </nav>
+</header>
+
+<main>
+<!-- ================================================================ TAB 1 -->
+<section id="tab-offline" class="tab-panel active">
+  <div class="page-note">
+    本页全部数字来自冻结聚合（<code>eval/results-summary.json</code>、<code>eval/c1/</code>、
+    <code>eval/ablation/</code>、<code>logs/s2_continuation_probes_summary.json</code>），
+    由后端 <code>/api/data</code> 原样读出——前端不重算任何指标。断网可完整演示。
+  </div>
+
+  <h2 class="sec-title">TL;DR 总览</h2>
+  <div class="card">
+    <div class="table-wrap">
+      <table class="tbl" id="tldrTable">
+        <thead>
+          <tr><th>Arm</th><th>说明</th><th>Mean quality（1–5）</th><th>Exec cost</th>
+              <th>GT tier accuracy</th><th>Verdict</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="footnote" id="tldrFoot"></p>
+  </div>
+
+  <h2 class="sec-title">预注册判据</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>D10 判定（C0 vs B）<span id="d10Verdict" class="pill"></span></h3>
+      <div class="table-wrap">
+        <table class="tbl" id="d10Table">
+          <thead><tr><th>Criterion</th><th>Measured</th><th>结果</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>C1 P1–P5（gated，min_neighbors=3）<span id="p15Verdict" class="pill"></span></h3>
+      <div class="table-wrap">
+        <table class="tbl" id="p15Table">
+          <thead><tr><th>Criterion</th><th>Measured</th><th>结果</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="sec-title">失效模式：逐任务故事</h2>
+  <div class="grid-3">
+    <div class="card" id="c0FlipCard">
+      <h3>C0 有害 flips（2 条）</h3>
+      <p class="card-sub">小邻域 λ-exploration 把 simple 推到 complex：成本上升、质量不变。</p>
+      <div id="c0FlipList"></div>
+    </div>
+    <div class="card" id="c1CascadeCard">
+      <h3>C1 记忆级联</h3>
+      <p class="card-sub">gate 抑制了 C0 的 T06/T19，但被 gate 的决策仍写回记忆——问题被移动到 T20。</p>
+      <div id="c1GateChips" class="chip-row"></div>
+      <div id="c1CascadeList"></div>
+    </div>
+    <div class="card" id="t8Card">
+      <h3>T8 消融：LM vs PM</h3>
+      <p class="card-sub">两臂重放同一份冻结 C0 prefix 记忆（只读）。</p>
+      <div id="t8Body"></div>
+      <p class="caveat" id="t8Caveat"></p>
+    </div>
+  </div>
+
+  <h2 class="sec-title">续轮探针（continuation probes）</h2>
+  <div class="card">
+    <p class="card-sub" id="contSummary"></p>
+    <div class="table-wrap">
+      <table class="tbl" id="contTable">
+        <thead><tr><th>Probe</th><th>prev tier（传入 prompt）</th><th>expected</th>
+                    <th>Judge chosen</th><th>hit</th><th>judge latency</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="footnote">previousTier 确实传入 prompt 并提高了其相对 logit，但 MiniCPM5-1B 的
+      simple 偏置每次都压过它——这是可复现的 Judge 能力限制，不是管线 bug。</p>
+  </div>
+
+  <h2 class="sec-title">延迟归因与截断统计</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>延迟归因</h3>
+      <div id="latencyStats" class="stat-grid"></div>
+      <p class="footnote">每次判档 = 4 个本地 grammar-forced 请求（Method B）；JitRL 后处理
+        （检索 + 价值估计 + logit 调制）亚毫秒级，近零开销。</p>
+    </div>
+    <div class="card">
+      <h3>截断与空回复</h3>
+      <div class="table-wrap">
+        <table class="tbl" id="truncTable">
+          <thead><tr><th>组</th><th>finish_reason=length</th><th>空回复</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="footnote">glm-5.3-flash 等网关模型先输出 reasoning_content；max_tokens=512 时
+        预算可能被推理前导耗尽（harness 已按校准结论提到 1024）。</p>
+    </div>
+  </div>
+
+  <h2 class="sec-title">故障与重试审计</h2>
+  <div class="card">
+    <div id="retryNarrative" class="narrative"></div>
+    <div class="table-wrap">
+      <table class="tbl" id="auditTable">
+        <thead><tr><th>文件</th><th>记录数</th><th>eval success</th><th>失败任务</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2 class="sec-title">图表（冻结 SVG）</h2>
+  <div class="card">
+    <h3>A / B / C0 主实验</h3>
+    <div class="chart-grid" id="chartsMain"></div>
+    <h3>C1 门控实验</h3>
+    <div class="chart-grid" id="chartsC1"></div>
+    <h3>T8 消融</h3>
+    <div class="chart-grid" id="chartsAblation"></div>
+    <h3>架构图</h3>
+    <div class="chart-grid" id="chartsDiagrams"></div>
+  </div>
+
+  <p class="sources" id="sources"></p>
+</section>
+
+<!-- ================================================================ TAB 2 -->
+<section id="tab-online" class="tab-panel">
+  <div id="onlineBanner" class="banner banner-warn hidden"></div>
+
+  <div class="online-grid">
+    <!-- 左：决策表单与 trace -->
+    <div class="col-main">
+      <div class="card">
+        <h3>决策请求</h3>
+        <div class="arm-row" id="armRow"></div>
+        <p class="arm-desc" id="armDesc"></p>
+        <label class="field-label" for="taskSelect">预设任务（24 条主任务）</label>
+        <select id="taskSelect" class="select"></select>
+        <label class="field-label" for="messageInput">任务消息（可自由输入；预设任务会填充此处）</label>
+        <textarea id="messageInput" rows="6" class="textarea"
+                  placeholder="输入任意用户消息，或从上方预设任务中选择……"></textarea>
+        <div class="toggle-row">
+          <label class="toggle"><input type="checkbox" id="toggleExec" checked>
+            <span>执行生成（CPA 真实调用）</span></label>
+          <label class="toggle"><input type="checkbox" id="toggleEval" checked>
+            <span>盲评并写回记忆（gpt-5.6-sol）</span></label>
+        </div>
+        <div class="btn-row">
+          <button id="decideBtn" class="btn btn-primary">决策</button>
+          <span id="decideSpin" class="spinner hidden"></span>
+        </div>
+      </div>
+
+      <div id="errorPanel" class="banner banner-err hidden"></div>
+
+      <div class="card hidden" id="resultCard">
+        <h3>决策 trace <span id="resultArm" class="pill pill-plain"></span></h3>
+
+        <div class="trace-head">
+          <div><span class="mini-label">chosen tier</span>
+            <span id="chosenTier" class="tier-badge"></span>
+            <span id="flipMark" class="flip-mark hidden">flip</span></div>
+          <div><span class="mini-label">执行模型</span><span id="execModel" class="mono"></span></div>
+          <div><span class="mini-label">gate</span><span id="gateBadge" class="pill"></span></div>
+        </div>
+
+        <h4 class="sub-title">四档 logit <span id="logitModeLabel" class="mini-label"></span></h4>
+        <div id="logitBars"></div>
+
+        <h4 class="sub-title">检索到的记忆（<span id="nRetrieved">0</span> 条）</h4>
+        <div id="retrievedList" class="chip-row"></div>
+        <div id="pmMeta" class="mini-label hidden"></div>
+
+        <div class="vqa-grid">
+          <div><span class="mini-label">V</span><span id="vVal" class="mono big-num"></span></div>
+          <div><span class="mini-label">Q（每档）</span><span id="qVal" class="mono small-num"></span></div>
+          <div><span class="mini-label">Â（归一化优势）</span><span id="aVal" class="mono small-num"></span></div>
+        </div>
+
+        <div class="latency-row">
+          <span>judge <b id="judgeLat"></b></span>
+          <span>JitRL 后处理 <b id="jitrlLat"></b></span>
+          <span id="modBadge" class="pill"></span>
+        </div>
+
+        <h4 class="sub-title">执行结果</h4>
+        <div id="execBlock"></div>
+
+        <h4 class="sub-title">盲评与 reward</h4>
+        <div id="evalBlock"></div>
+      </div>
+    </div>
+
+    <!-- 右：会话面板 -->
+    <div class="col-side">
+      <div class="card">
+        <h3>会话状态 <span class="mini-label">（仅存于服务器内存）</span></h3>
+        <div class="stat-grid">
+          <div><span class="mini-label">C0 记忆</span><span id="memC0" class="big-num">0</span></div>
+          <div><span class="mini-label">C1 记忆</span><span id="memC1" class="big-num">0</span></div>
+        </div>
+        <div class="budget">
+          <div class="budget-label"><span>累计执行成本</span>
+            <span id="budgetText" class="mono">$0.00 / $1.00</span></div>
+          <div class="budget-bar"><div id="budgetFill" class="budget-fill"></div></div>
+        </div>
+        <h4 class="sub-title">决策历史（cost / quality）</h4>
+        <div id="sparkline"></div>
+        <div id="historyList" class="history-list"></div>
+        <button id="resetBtn" class="btn btn-ghost">重置会话</button>
+        <p class="footnote">预算上限：<span id="capNote" class="mono">$1.00</span>/会话
+          （<code>--max-session-usd</code>）；超限返回结构化错误。观众输入文本不落盘、不进日志。</p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="footer">
+  JitRL Router 优化项目 · Session 3 Web Demo · stdlib-only（http.server，无第三方依赖）·
+  实验数字为冻结口径，n=24 方向性证据
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

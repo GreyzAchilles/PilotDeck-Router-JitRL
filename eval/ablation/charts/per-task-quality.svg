@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1020" height="480" viewBox="0 0 1020 480" font-family="Helvetica,Arial,sans-serif">
+<rect width="1020" height="480" fill="white"/>
+<text x="510.0" y="26" font-size="17" font-weight="bold" text-anchor="middle">T8 per-task quality score (frozen task order)</text>
+<line x1="70" y1="416.0" x2="870" y2="416.0" stroke="#e5e7eb"/>
+<text x="62" y="420.0" font-size="11" text-anchor="end">1.00</text>
+<line x1="70" y1="344.0" x2="870" y2="344.0" stroke="#e5e7eb"/>
+<text x="62" y="348.0" font-size="11" text-anchor="end">1.80</text>
+<line x1="70" y1="272.0" x2="870" y2="272.0" stroke="#e5e7eb"/>
+<text x="62" y="276.0" font-size="11" text-anchor="end">2.60</text>
+<line x1="70" y1="200.0" x2="870" y2="200.0" stroke="#e5e7eb"/>
+<text x="62" y="204.0" font-size="11" text-anchor="end">3.40</text>
+<line x1="70" y1="128.0" x2="870" y2="128.0" stroke="#e5e7eb"/>
+<text x="62" y="132.0" font-size="11" text-anchor="end">4.20</text>
+<line x1="70" y1="56.0" x2="870" y2="56.0" stroke="#e5e7eb"/>
+<text x="62" y="60.0" font-size="11" text-anchor="end">5.00</text>
+<text x="16" y="236.0" font-size="12" text-anchor="middle" transform="rotate(-90 16 236.0)">quality (1-5)</text>
+<polyline points="70.0,56.1 104.8,416.0 139.6,56.1 174.3,416.0 209.1,416.0 243.9,56.1 278.7,56.1 313.5,416.0 348.3,56.1 383.0,146.1 417.8,416.0 452.6,416.0 487.4,56.1 522.2,416.0 557.0,236.0 591.7,56.1 626.5,416.0 661.3,416.0 696.1,56.1 730.9,416.0 765.7,416.0 800.4,416.0 835.2,416.0 870.0,416.0" fill="none" stroke="#f59e0b" stroke-width="2"/>
+<circle cx="70.0" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="104.8" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="139.6" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="174.3" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="209.1" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="243.9" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="278.7" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="313.5" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="348.3" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="383.0" cy="146.1" r="3.5" fill="#f59e0b"/>
+<circle cx="417.8" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="452.6" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="487.4" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="522.2" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="557.0" cy="236.0" r="3.5" fill="#f59e0b"/>
+<circle cx="591.7" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="626.5" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="661.3" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="696.1" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="730.9" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="765.7" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="800.4" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="835.2" cy="416.0" r="3.5" fill="#f59e0b"/>
+<circle cx="870.0" cy="416.0" r="3.5" fill="#f59e0b"/>
+<line x1="886" y1="76" x2="916" y2="76" stroke="#f59e0b" stroke-width="2"/>
+<text x="922" y="80" font-size="12">T8-LM</text>
+<polyline points="70.0,56.1 104.8,416.0 139.6,56.1 174.3,416.0 209.1,416.0 243.9,56.1 278.7,56.1 313.5,416.0 348.3,56.1 383.0,146.1 417.8,416.0 452.6,416.0 487.4,56.1 522.2,416.0 557.0,236.0 591.7,56.1 626.5,416.0 661.3,416.0 696.1,56.1 730.9,416.0 765.7,416.0 800.4,416.0 835.2,416.0 870.0,416.0" fill="none" stroke="#3b82f6" stroke-width="2"/>
+<circle cx="70.0" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="104.8" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="139.6" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="174.3" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="209.1" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="243.9" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="278.7" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="313.5" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="348.3" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="383.0" cy="146.1" r="3.5" fill="#3b82f6"/>
+<circle cx="417.8" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="452.6" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="487.4" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="522.2" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="557.0" cy="236.0" r="3.5" fill="#3b82f6"/>
+<circle cx="591.7" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="626.5" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="661.3" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="696.1" cy="56.1" r="3.5" fill="#3b82f6"/>
+<circle cx="730.9" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="765.7" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="800.4" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="835.2" cy="416.0" r="3.5" fill="#3b82f6"/>
+<circle cx="870.0" cy="416.0" r="3.5" fill="#3b82f6"/>
+<line x1="886" y1="96" x2="916" y2="96" stroke="#3b82f6" stroke-width="2"/>
+<text x="922" y="100" font-size="12">T8-PM</text>
+<text x="70.0" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 70.0 434)">T01</text>
+<text x="139.6" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 139.6 434)">T09</text>
+<text x="209.1" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 209.1 434)">T17</text>
+<text x="278.7" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 278.7 434)">T02</text>
+<text x="348.3" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 348.3 434)">T10</text>
+<text x="417.8" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 417.8 434)">T18</text>
+<text x="487.4" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 487.4 434)">T03</text>
+<text x="557.0" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 557.0 434)">T11</text>
+<text x="626.5" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 626.5 434)">T19</text>
+<text x="696.1" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 696.1 434)">T04</text>
+<text x="765.7" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 765.7 434)">T12</text>
+<text x="835.2" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 835.2 434)">T20</text>
+</svg>

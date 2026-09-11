@@ -1,0 +1,54 @@
+{
+ "schema": "s3-tab8-frozen-memory-trace-v1",
+ "preregistration": "S3-TAB8-PREREGISTRATION.md v1.0 (2026-09-11, frozen before run)",
+ "source": {
+  "memory_path": "logs/s2_full_C_main24_retry2_memory.jsonl",
+  "memory_sha256": "7f4e2d8257cc99e466e0886dcd48e18834df4500015cc484a78794bf909df4aa",
+  "run_path": "logs/s2_full_C_main24_retry2.jsonl",
+  "run_sha256": "6c37ef28a9f0e85b2a55f40727d096791dfce40995bb033dd4cf6d5a41e438b4"
+ },
+ "copy": {
+  "path": "eval/ablation/frozen-c0-memory-trace.jsonl",
+  "sha256": "817e5d8a4726062e5316ac507734245f6394e3d191e2525225e80621b9ecc5c8"
+ },
+ "frozen_task_order": [
+  "T01",
+  "T05",
+  "T09",
+  "T13",
+  "T17",
+  "T21",
+  "T02",
+  "T06",
+  "T10",
+  "T14",
+  "T18",
+  "T22",
+  "T03",
+  "T07",
+  "T11",
+  "T15",
+  "T19",
+  "T23",
+  "T04",
+  "T08",
+  "T12",
+  "T16",
+  "T20",
+  "T24"
+ ],
+ "n_entries": 24,
+ "added_fields": [
+  "source_task_id",
+  "source_order"
+ ],
+ "preserved_fields": [
+  "intent_class",
+  "signature_tokens",
+  "tier",
+  "G",
+  "ts",
+  "episode_id"
+ ],
+ "note": "Frozen C0 memory trace replay copy for the S3 Table-8 ablation. Each line is the verbatim C0 memory entry (fields unmodified) plus source_task_id/source_order keyed to the frozen 24-task order of prereg section 2.2. Read-only asset: the ablation harness never writes memory and never modifies this file."
+}

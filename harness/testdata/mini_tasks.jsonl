@@ -1,0 +1,10 @@
+{"task_id": "t01", "family": "code_gen", "message": "写一个函数，实现 LRU 缓存，附带单元测试", "gt_tier": "complex"}
+{"task_id": "t02", "family": "code_gen", "message": "实现一个函数，解析配置文件并处理异常路径，写单元测试", "gt_tier": "complex"}
+{"task_id": "t03", "family": "code_gen", "message": "写一个函数实现二分查找，单元测试覆盖空列表边界", "gt_tier": "complex"}
+{"task_id": "t04", "family": "continuation", "message": "继续，好的，接着写下一个工具函数", "gt_tier": "complex"}
+{"task_id": "t05", "family": "data_analysis", "message": "分析这份销售数据，统计月度环比，对比两个渠道的表现", "gt_tier": "reasoning"}
+{"task_id": "t06", "family": "data_analysis", "message": "分析用户留存数据，统计周流失率，对比新旧版本差异", "gt_tier": "reasoning"}
+{"task_id": "t07", "family": "doc_writing", "message": "写一封项目周报，总结本周进展与下周发布计划", "gt_tier": "simple"}
+{"task_id": "t08", "family": "doc_writing", "message": "写一封发布公告，说明 v2.0 上线时间和新特性", "gt_tier": "simple"}
+{"task_id": "t09", "family": "refactor", "message": "重构这段代码，优化性能：```def s(x): return [x[i]*2 for i in range(len(x))]```", "gt_tier": "medium"}
+{"task_id": "t10", "family": "chat_qa", "message": "你好，谢谢！记住我喜欢简洁的回复", "gt_tier": "simple"}

@@ -1,0 +1,981 @@
+{
+  "inputs": {
+    "formal": {
+      "A": "logs/s2_full_A_main24.jsonl",
+      "B": "logs/s2_full_B_family_order.jsonl",
+      "C": "logs/s2_full_C_main24_retry2.jsonl"
+    },
+    "audit_only": [
+      "logs/s2_full_C_main24.jsonl",
+      "logs/s2_full_C_main24_rerun.jsonl"
+    ]
+  },
+  "outputs": {
+    "charts": [
+      "eval\\charts\\bc-paired-exec-cost.svg",
+      "eval\\charts\\bc-paired-quality.svg",
+      "eval\\charts\\cost-summary.svg",
+      "eval\\charts\\learning-curve.svg",
+      "eval\\charts\\quality-distribution.svg"
+    ]
+  },
+  "groups": {
+    "A": {
+      "n_records": 24,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "eval_failures": [],
+      "quality": {
+        "mean": 2.2083,
+        "sd": 1.7932,
+        "min": 1.0,
+        "max": 5.0,
+        "distribution": {
+          "1": 16,
+          "2": 0,
+          "3": 1,
+          "4": 1,
+          "5": 6
+        },
+        "verdicts": {
+          "useful": 8,
+          "neutral": 16,
+          "harmful": 0
+        },
+        "capability_insufficient": 16
+      },
+      "exec_cost_usd": {
+        "total": 0.088888,
+        "mean": 0.003704,
+        "min": 0.000238,
+        "max": 0.004605
+      },
+      "eval_cost_usd": {
+        "total": 0.147676,
+        "mean": 0.006153
+      },
+      "finish_reason_length": 17,
+      "empty_response": 16,
+      "flips": 0,
+      "memory_written": 0,
+      "latency_ms": {
+        "judge_mean": 0.0,
+        "jitrl_mean": 0.0,
+        "jitrl_max": 0.0,
+        "exec_mean": 15623.3,
+        "evaluator_mean": 5833.1
+      },
+      "static_tier_gt_coincidence": {
+        "matches": 9,
+        "match_rate": 0.375,
+        "over_provisioned": 15,
+        "under_provisioned": 0,
+        "misgrade_rate": 0.625,
+        "note": "static tier 'reasoning' vs GT coincidence; NOT routing accuracy (A runs no router)."
+      }
+    },
+    "B": {
+      "n_records": 24,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "eval_failures": [],
+      "quality": {
+        "mean": 2.6667,
+        "sd": 1.9035,
+        "min": 1.0,
+        "max": 5.0,
+        "distribution": {
+          "1": 13,
+          "2": 0,
+          "3": 1,
+          "4": 2,
+          "5": 8
+        },
+        "verdicts": {
+          "useful": 11,
+          "neutral": 12,
+          "harmful": 1
+        },
+        "capability_insufficient": 13
+      },
+      "exec_cost_usd": {
+        "total": 0.028333,
+        "mean": 0.001181,
+        "min": 8.2e-05,
+        "max": 0.004553
+      },
+      "eval_cost_usd": {
+        "total": 0.1799,
+        "mean": 0.007496
+      },
+      "tier_vs_gt": {
+        "matches": 7,
+        "match_rate": 0.2917,
+        "over_provisioned": 0,
+        "under_provisioned": 17,
+        "misgrade_rate": 0.7083
+      },
+      "finish_reason_length": 16,
+      "empty_response": 12,
+      "flips": 0,
+      "memory_written": 0,
+      "latency_ms": {
+        "judge_mean": 1150.0,
+        "jitrl_mean": 0.0,
+        "jitrl_max": 0.0,
+        "exec_mean": 18099.1,
+        "evaluator_mean": 6794.1
+      }
+    },
+    "C": {
+      "n_records": 24,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "eval_failures": [],
+      "quality": {
+        "mean": 2.7917,
+        "sd": 1.8411,
+        "min": 1.0,
+        "max": 5.0,
+        "distribution": {
+          "1": 11,
+          "2": 1,
+          "3": 2,
+          "4": 2,
+          "5": 8
+        },
+        "verdicts": {
+          "useful": 13,
+          "neutral": 11,
+          "harmful": 0
+        },
+        "capability_insufficient": 13
+      },
+      "exec_cost_usd": {
+        "total": 0.029406,
+        "mean": 0.001225,
+        "min": 6e-05,
+        "max": 0.00473
+      },
+      "eval_cost_usd": {
+        "total": 0.188448,
+        "mean": 0.007852
+      },
+      "tier_vs_gt": {
+        "matches": 7,
+        "match_rate": 0.2917,
+        "over_provisioned": 1,
+        "under_provisioned": 16,
+        "misgrade_rate": 0.7083
+      },
+      "finish_reason_length": 16,
+      "empty_response": 10,
+      "flips": 2,
+      "memory_written": 24,
+      "latency_ms": {
+        "judge_mean": 2311.0,
+        "jitrl_mean": 0.2444,
+        "jitrl_max": 0.6664,
+        "exec_mean": 18783.6,
+        "evaluator_mean": 6290.8
+      }
+    }
+  },
+  "file_summaries": {
+    "A": {
+      "mode": "A",
+      "judge": "llama",
+      "episodes": 1,
+      "n_records": 24,
+      "accuracy_vs_gt": 0.375,
+      "flips": 0,
+      "memory_size": 0,
+      "memory_written": 0,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "avg_quality_score": 2.2083333333333335,
+      "verdicts": {
+        "useful": 8,
+        "harmful": 0,
+        "neutral": 16
+      },
+      "avg_exec_cost_usd": 0.0037036849999999995,
+      "total_exec_cost_usd": 0.08888843999999999,
+      "total_eval_cost_usd": 0.147676,
+      "avg_reward_real": -0.23749999999999996,
+      "avg_judge_latency_ms": 0.0,
+      "avg_jitrl_latency_ms": 0.0
+    },
+    "B": {
+      "mode": "B",
+      "judge": "llama",
+      "episodes": 1,
+      "n_records": 24,
+      "accuracy_vs_gt": 0.2916666666666667,
+      "flips": 0,
+      "memory_size": 0,
+      "memory_written": 0,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "avg_quality_score": 2.6666666666666665,
+      "verdicts": {
+        "useful": 11,
+        "harmful": 1,
+        "neutral": 12
+      },
+      "avg_exec_cost_usd": 0.0011805541666666667,
+      "total_exec_cost_usd": 0.028333300000000002,
+      "total_eval_cost_usd": 0.1799,
+      "avg_reward_real": 0.11575304842470428,
+      "avg_judge_latency_ms": 1150.016412500084,
+      "avg_jitrl_latency_ms": 0.0
+    },
+    "C": {
+      "mode": "C",
+      "judge": "llama",
+      "episodes": 1,
+      "n_records": 24,
+      "accuracy_vs_gt": 0.2916666666666667,
+      "flips": 2,
+      "memory_size": 24,
+      "memory_written": 24,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "avg_quality_score": 2.7916666666666665,
+      "verdicts": {
+        "useful": 13,
+        "harmful": 0,
+        "neutral": 11
+      },
+      "avg_exec_cost_usd": 0.0012252295833333334,
+      "total_exec_cost_usd": 0.029405510000000003,
+      "total_eval_cost_usd": 0.188448,
+      "avg_reward_real": 0.15123631843577987,
+      "avg_judge_latency_ms": 2311.0389000000473,
+      "avg_jitrl_latency_ms": 0.24436666660676565
+    }
+  },
+  "consistency": {
+    "a_ids": [
+      "T01",
+      "T05",
+      "T09",
+      "T13",
+      "T17",
+      "T21",
+      "T02",
+      "T06",
+      "T10",
+      "T14",
+      "T18",
+      "T22",
+      "T03",
+      "T07",
+      "T11",
+      "T15",
+      "T19",
+      "T23",
+      "T04",
+      "T08",
+      "T12",
+      "T16",
+      "T20",
+      "T24"
+    ],
+    "b_ids": [
+      "T01",
+      "T05",
+      "T09",
+      "T13",
+      "T17",
+      "T21",
+      "T02",
+      "T06",
+      "T10",
+      "T14",
+      "T18",
+      "T22",
+      "T03",
+      "T07",
+      "T11",
+      "T15",
+      "T19",
+      "T23",
+      "T04",
+      "T08",
+      "T12",
+      "T16",
+      "T20",
+      "T24"
+    ],
+    "c_ids": [
+      "T01",
+      "T05",
+      "T09",
+      "T13",
+      "T17",
+      "T21",
+      "T02",
+      "T06",
+      "T10",
+      "T14",
+      "T18",
+      "T22",
+      "T03",
+      "T07",
+      "T11",
+      "T15",
+      "T19",
+      "T23",
+      "T04",
+      "T08",
+      "T12",
+      "T16",
+      "T20",
+      "T24"
+    ],
+    "abc_same_id_set": true,
+    "abc_same_order": true,
+    "bc_same_id_set": true,
+    "bc_same_id_count": true,
+    "bc_same_order": true,
+    "b_order_style": "family_blocked",
+    "c_order_style": "family_blocked",
+    "c_order_equals_a_order": true,
+    "all_episode_id_1": true,
+    "route_modes": {
+      "A": [
+        "static"
+      ],
+      "B": [
+        "judge"
+      ],
+      "C": [
+        "jitrl"
+      ]
+    },
+    "bc_judge_base_choice_consistent": false,
+    "bc_judge_base_choice_mismatches": [
+      {
+        "task_id": "T13",
+        "b_chosen_tier": "complex",
+        "c_base_choice": "simple"
+      },
+      {
+        "task_id": "T22",
+        "b_chosen_tier": "complex",
+        "c_base_choice": "medium"
+      }
+    ]
+  },
+  "paired_bc": {
+    "n_pairs": 24,
+    "quality": {
+      "mean_B": 2.6667,
+      "mean_C": 2.7917,
+      "mean_delta": 0.125,
+      "improved_tasks": 2,
+      "worsened_tasks": 0,
+      "unchanged_tasks": 22
+    },
+    "exec_cost": {
+      "total_B_usd": 0.028333,
+      "total_C_usd": 0.029406,
+      "total_delta_usd": 0.001072,
+      "total_change_pct": 3.78,
+      "savings_pct_bc": -3.78,
+      "mean_delta_usd": 4.5e-05,
+      "flip_tasks_delta_usd": 0.008239,
+      "judge_drift_tasks_delta_usd": -0.007347,
+      "nonflip_tasks_delta_usd": -0.007167,
+      "same_tier_tasks_delta_usd": 0.00018,
+      "note": "flip_tasks = C modulation changed the executed tier vs the judge base choice; judge_drift_tasks = not flipped but the judge issued a different base decision in the B run than in the C run (local llama judge nondeterminism); same_tier deltas are execution sampling variance (temperature 0.7)."
+    },
+    "tier_changes": {
+      "n_total": 4,
+      "task_ids": [
+        "T06",
+        "T13",
+        "T19",
+        "T22"
+      ],
+      "modulation_flip_task_ids": [
+        "T06",
+        "T19"
+      ],
+      "judge_base_drift_task_ids": [
+        "T13",
+        "T22"
+      ],
+      "note": "executed tier differs between B and C on these tasks; only modulation flips are attributable to JitRL, judge base drift is not."
+    },
+    "quality_attribution": {
+      "flip_tasks_quality_delta": 0,
+      "judge_drift_tasks_quality_delta": 1,
+      "same_tier_tasks_quality_delta": 2,
+      "note": "B->C quality delta decomposes into JitRL-flip tasks, judge-base-drift tasks (different executed tier because the judge decided differently across runs) and same-tier tasks (pure execution sampling variance, temperature 0.7); only the flip part is attributable to JitRL modulation."
+    },
+    "per_task": [
+      {
+        "task_id": "T01",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000114,
+        "exec_cost_C_usd": 0.00019,
+        "exec_cost_delta_usd": 7.6e-05,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T05",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000518,
+        "exec_cost_C_usd": 0.000518,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T09",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000285,
+        "exec_cost_C_usd": 0.000279,
+        "exec_cost_delta_usd": -6e-06,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T13",
+        "quality_B": 4,
+        "quality_C": 4,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.004553,
+        "exec_cost_C_usd": 0.000517,
+        "exec_cost_delta_usd": -0.004036,
+        "tier_B": "complex",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T17",
+        "quality_B": 1,
+        "quality_C": 3,
+        "quality_delta": 2,
+        "exec_cost_B_usd": 0.000521,
+        "exec_cost_C_usd": 0.000521,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T21",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 8.2e-05,
+        "exec_cost_C_usd": 6e-05,
+        "exec_cost_delta_usd": -2.2e-05,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T02",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000166,
+        "exec_cost_C_usd": 0.000115,
+        "exec_cost_delta_usd": -5e-05,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T06",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000518,
+        "exec_cost_C_usd": 0.004563,
+        "exec_cost_delta_usd": 0.004045,
+        "tier_B": "simple",
+        "tier_C": "complex",
+        "flipped": true
+      },
+      {
+        "task_id": "T10",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.00034,
+        "exec_cost_C_usd": 0.000212,
+        "exec_cost_delta_usd": -0.000128,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T14",
+        "quality_B": 4,
+        "quality_C": 4,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.001255,
+        "exec_cost_C_usd": 0.001255,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "medium",
+        "tier_C": "medium",
+        "flipped": false
+      },
+      {
+        "task_id": "T18",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000525,
+        "exec_cost_C_usd": 0.000525,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T22",
+        "quality_B": 1,
+        "quality_C": 2,
+        "quality_delta": 1,
+        "exec_cost_B_usd": 0.004546,
+        "exec_cost_C_usd": 0.001235,
+        "exec_cost_delta_usd": -0.003311,
+        "tier_B": "complex",
+        "tier_C": "medium",
+        "flipped": false
+      },
+      {
+        "task_id": "T03",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000197,
+        "exec_cost_C_usd": 0.000278,
+        "exec_cost_delta_usd": 8.2e-05,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T07",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000521,
+        "exec_cost_C_usd": 0.000521,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T11",
+        "quality_B": 3,
+        "quality_C": 3,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.001239,
+        "exec_cost_C_usd": 0.001239,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "medium",
+        "tier_C": "medium",
+        "flipped": false
+      },
+      {
+        "task_id": "T15",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000963,
+        "exec_cost_C_usd": 0.001167,
+        "exec_cost_delta_usd": 0.000204,
+        "tier_B": "medium",
+        "tier_C": "medium",
+        "flipped": false
+      },
+      {
+        "task_id": "T19",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000536,
+        "exec_cost_C_usd": 0.00473,
+        "exec_cost_delta_usd": 0.004194,
+        "tier_B": "simple",
+        "tier_C": "complex",
+        "flipped": true
+      },
+      {
+        "task_id": "T23",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.00455,
+        "exec_cost_C_usd": 0.00455,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "complex",
+        "tier_C": "complex",
+        "flipped": false
+      },
+      {
+        "task_id": "T04",
+        "quality_B": 5,
+        "quality_C": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000221,
+        "exec_cost_C_usd": 0.000246,
+        "exec_cost_delta_usd": 2.5e-05,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T08",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000522,
+        "exec_cost_C_usd": 0.000522,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T12",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000538,
+        "exec_cost_C_usd": 0.000538,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T16",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000534,
+        "exec_cost_C_usd": 0.000534,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T20",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000536,
+        "exec_cost_C_usd": 0.000536,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "simple",
+        "tier_C": "simple",
+        "flipped": false
+      },
+      {
+        "task_id": "T24",
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.004553,
+        "exec_cost_C_usd": 0.004553,
+        "exec_cost_delta_usd": 0.0,
+        "tier_B": "complex",
+        "tier_C": "complex",
+        "flipped": false
+      }
+    ]
+  },
+  "flips": {
+    "n_flips": 2,
+    "flips": [
+      {
+        "task_id": "T06",
+        "family": "code_gen",
+        "gt_tier": "medium",
+        "base_choice": "simple",
+        "chosen_tier": "complex",
+        "exec_model": "CPA/OpenBMB-5.3",
+        "n_retrieved": 1,
+        "top_similarity": 1.0,
+        "V": -0.3341,
+        "exec_finish_reason": "length",
+        "response_empty": true,
+        "gt_correct_before": false,
+        "gt_correct_after": false,
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000518,
+        "exec_cost_C_usd": 0.004563,
+        "exec_cost_delta_usd": 0.004045
+      },
+      {
+        "task_id": "T19",
+        "family": "refactor",
+        "gt_tier": "reasoning",
+        "base_choice": "simple",
+        "chosen_tier": "complex",
+        "exec_model": "CPA/OpenBMB-5.3",
+        "n_retrieved": 2,
+        "top_similarity": 1.0,
+        "V": -0.034,
+        "exec_finish_reason": "length",
+        "response_empty": true,
+        "gt_correct_before": false,
+        "gt_correct_after": false,
+        "quality_B": 1,
+        "quality_C": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000536,
+        "exec_cost_C_usd": 0.00473,
+        "exec_cost_delta_usd": 0.004194
+      }
+    ],
+    "quality_delta_sum": 0,
+    "exec_cost_delta_sum_usd": 0.008239,
+    "gt_correctness_changes": 0,
+    "improved": 0,
+    "worsened": 0
+  },
+  "learning_curve": {
+    "segments": {
+      "pre_tertile": {
+        "positions": [
+          1,
+          8
+        ],
+        "quality_mean": 3.625,
+        "reward_mean": 0.4202,
+        "gt_match_rate": 0.375,
+        "n_retrieved_sum": 1
+      },
+      "mid_tertile": {
+        "positions": [
+          9,
+          16
+        ],
+        "quality_mean": 3.25,
+        "reward_mean": 0.3173,
+        "gt_match_rate": 0.125,
+        "n_retrieved_sum": 3
+      },
+      "post_tertile": {
+        "positions": [
+          17,
+          24
+        ],
+        "quality_mean": 1.5,
+        "reward_mean": -0.2838,
+        "gt_match_rate": 0.375,
+        "n_retrieved_sum": 8
+      },
+      "first_half": {
+        "positions": [
+          1,
+          12
+        ],
+        "quality_mean": 3.4167,
+        "reward_mean": 0.3609,
+        "gt_match_rate": 0.25,
+        "n_retrieved_sum": 2
+      },
+      "second_half": {
+        "positions": [
+          13,
+          24
+        ],
+        "quality_mean": 2.1667,
+        "reward_mean": -0.0584,
+        "gt_match_rate": 0.3333,
+        "n_retrieved_sum": 10
+      }
+    },
+    "per_position_quality": [
+      5,
+      1,
+      5,
+      4,
+      3,
+      5,
+      5,
+      1,
+      5,
+      4,
+      1,
+      2,
+      5,
+      1,
+      3,
+      5,
+      1,
+      1,
+      5,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "per_position_task_ids": [
+      "T01",
+      "T05",
+      "T09",
+      "T13",
+      "T17",
+      "T21",
+      "T02",
+      "T06",
+      "T10",
+      "T14",
+      "T18",
+      "T22",
+      "T03",
+      "T07",
+      "T11",
+      "T15",
+      "T19",
+      "T23",
+      "T04",
+      "T08",
+      "T12",
+      "T16",
+      "T20",
+      "T24"
+    ],
+    "confound": "family-blocked order: reasoning-heavy families run in positions 13-24, so late-segment quality drops are task difficulty, not necessarily forgetting/decay."
+  },
+  "retrieval_memory": {
+    "tasks_with_retrieval": 6,
+    "retrieval_task_ids": [
+      "T06",
+      "T18",
+      "T07",
+      "T19",
+      "T08",
+      "T20"
+    ],
+    "avg_n_retrieved_when_hit": 2.0,
+    "top_similarity_mean_when_hit": 1.0,
+    "flips_among_retrieval_hits": 2,
+    "memory_written": 24,
+    "memory_entries_final": 24
+  },
+  "failure_audit": [
+    {
+      "file": "s2_full_C_main24.jsonl",
+      "n_records": 24,
+      "eval_success": "22/24",
+      "failures": [
+        {
+          "task_id": "T14",
+          "chosen_tier": "medium",
+          "exec_error": "CPATransportError: CPA request failed (HTTP 500) after 4 attempt(s): {\"error\":{\"message\":\"Post \\\"https://opencode.ai/zen/go/v1/chat/completions\\\": unexpected EOF\",\"type\":\"server_error\",\"code\":\"internal_server_error\"}}",
+          "eval_error": null,
+          "exec_finish_reason": null,
+          "memory_written": false
+        },
+        {
+          "task_id": "T22",
+          "chosen_tier": "medium",
+          "exec_error": "CPATransportError: CPA request failed (HTTP 500) after 4 attempt(s): {\"error\":{\"message\":\"Post \\\"https://opencode.ai/zen/go/v1/chat/completions\\\": unexpected EOF\",\"type\":\"server_error\",\"code\":\"internal_server_error\"}}",
+          "eval_error": null,
+          "exec_finish_reason": null,
+          "memory_written": false
+        }
+      ]
+    },
+    {
+      "file": "s2_full_C_main24_rerun.jsonl",
+      "n_records": 24,
+      "eval_success": "22/24",
+      "failures": [
+        {
+          "task_id": "T20",
+          "chosen_tier": "complex",
+          "exec_error": null,
+          "eval_error": "evaluator failed (transport/parse/validate)",
+          "exec_finish_reason": "length",
+          "memory_written": false
+        },
+        {
+          "task_id": "T24",
+          "chosen_tier": "complex",
+          "exec_error": null,
+          "eval_error": "evaluator failed (transport/parse/validate)",
+          "exec_finish_reason": "stop",
+          "memory_written": false
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "A's tier-vs-GT rate is a static-tier coincidence (share of tasks whose GT tier equals the static 'reasoning' tier), NOT a routing accuracy.",
+    "B formal = s2_full_B_family_order.jsonl: judge-only routing, 24/24 eval success, executed in the same family-blocked task order as A and C (supersedes the older numeric-order B runs).",
+    "C formal = third full run (retry2, 24/24 eval success). The first two C runs appear only in failure_audit, never in metrics.",
+    "C learning-curve segments are confounded by the family-blocked task order (harder reasoning-heavy families run later); use directional only.",
+    "B->C executed-tier changes occur on 4 tasks: T06/T19 are JitRL modulation flips (judge base simple -> complex); T13/T22 are judge base-decision drift between the B and C runs (the local llama judge is not fully deterministic across runs), NOT modulation. Remaining B->C deltas are same-tier execution sampling variance (same model, temperature 0.7).",
+    "Judge (local llama, 127.0.0.1:18080) has $0 API cost; only its latency is reported. A/B jitrl_latency_ms=0.0 is the documented sentinel for 'no JitRL post-processing', not a measurement.",
+    "Evaluator budget (eval_cost_usd, blind gpt-5.6-sol) is measurement overhead reported separately from execution cost."
+  ],
+  "d10": {
+    "definition_status": "Frozen D10 criteria from project-decisions, relayed verbatim in the analysis directive; judged as-is on the formal runs.",
+    "criteria": [
+      {
+        "criterion": "C vs B exec cost savings >= 20% ((B-C)/B)",
+        "B_total_usd": 0.028333,
+        "C_total_usd": 0.029406,
+        "savings_pct": -3.78,
+        "met": false
+      },
+      {
+        "criterion": "quality: C - B >= -0.3 (C at most 0.3/5 below B)",
+        "B_mean": 2.6667,
+        "C_mean": 2.7917,
+        "delta": 0.125,
+        "met": true
+      },
+      {
+        "criterion": "C misgrade rate <= B misgrade rate + 5pp",
+        "B_misgrade_rate": 0.7083,
+        "C_misgrade_rate": 0.7083,
+        "diff_pp": 0.0,
+        "met": true
+      },
+      {
+        "criterion": "JitRL modulation post-processing latency increment <= 500 ms",
+        "increment_mean_ms": 0.2444,
+        "increment_max_ms": 0.6664,
+        "basis": "C jitrl_latency_ms minus the A/B 0.0 'no JitRL' sentinel; judged on the worst per-task increment",
+        "met": true
+      }
+    ],
+    "n_criteria_met": 3,
+    "verdict": "NOT MET",
+    "caveats": [
+      "n=24, one episode per task: directional evidence only; no statistical significance claimed.",
+      "Cost is judged on execution-cost totals ((B-C)/B); the blind evaluator budget is measurement overhead and is excluded.",
+      "JitRL latency is judged on the max per-task post-processing increment; the mean increment is reported alongside."
+    ]
+  }
+}

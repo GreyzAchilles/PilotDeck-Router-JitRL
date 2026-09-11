@@ -1,0 +1,1440 @@
+{
+  "meta": {
+    "analysis": "C1 (min-neighbor gated JitRL) post-run analysis",
+    "preregistration": "docs/S2-C1-PREREGISTRATION.md v1.0 (2026-09-11, frozen before the run)",
+    "policy_change": "min_neighbors: 1 -> 3 (only intended variable vs C0); n_retrieved < 3 -> native Judge",
+    "scope": "reads the formal logs only; no CPA calls, no docs writes, no commits; outputs confined to eval/c1/"
+  },
+  "inputs": {
+    "formal": {
+      "B": "logs/s2_full_B_family_order.jsonl",
+      "C0": "logs/s2_full_C_main24_retry2.jsonl",
+      "C1": "logs/s2_full_C1_main24.jsonl",
+      "C1_memory": "logs/s2_full_C1_main24_memory.jsonl",
+      "C0_memory": "logs/s2_full_C_main24_retry2_memory.jsonl"
+    }
+  },
+  "formal_input_assertions": {
+    "n_records": {
+      "B": 24,
+      "C0": 24,
+      "C1": 24
+    },
+    "eval_success": {
+      "B": "24/24",
+      "C0": "24/24",
+      "C1": "24/24"
+    },
+    "order_identical_b_c0_c1": true,
+    "order_equals_prereg": true,
+    "order": [
+      "T01",
+      "T05",
+      "T09",
+      "T13",
+      "T17",
+      "T21",
+      "T02",
+      "T06",
+      "T10",
+      "T14",
+      "T18",
+      "T22",
+      "T03",
+      "T07",
+      "T11",
+      "T15",
+      "T19",
+      "T23",
+      "T04",
+      "T08",
+      "T12",
+      "T16",
+      "T20",
+      "T24"
+    ],
+    "c1_config_snapshot": {
+      "k": 10,
+      "beta": 5.0,
+      "lam": 0.05,
+      "alpha": 5.0,
+      "jaccard_threshold": 0.5,
+      "z_min": -10.0,
+      "memory_cap": 5000,
+      "seed": 42,
+      "min_neighbors": 3
+    },
+    "c1_config_matches_prereg": true,
+    "c1_run_meta": {
+      "mode": "C",
+      "judge": "llama",
+      "episodes": 1
+    }
+  },
+  "groups": {
+    "B": {
+      "n_records": 24,
+      "eval_success": "24/24",
+      "quality": {
+        "mean": 2.6667,
+        "sd": 1.9035,
+        "sum": 64.0,
+        "min": 1.0,
+        "max": 5.0,
+        "distribution": {
+          "1": 13,
+          "2": 0,
+          "3": 1,
+          "4": 2,
+          "5": 8
+        },
+        "verdicts": {
+          "useful": 11,
+          "neutral": 12,
+          "harmful": 1
+        }
+      },
+      "exec_cost_usd": {
+        "total": 0.028333,
+        "mean": 0.001181
+      },
+      "eval_cost_usd": {
+        "total": 0.1799
+      },
+      "tier_vs_gt": {
+        "matches": 7,
+        "match_rate": 0.2917,
+        "misgrade_rate": 0.7083,
+        "over_provisioned": 0,
+        "under_provisioned": 17
+      },
+      "finish_reason_length": 16,
+      "empty_response_preview": 12,
+      "flips": 0,
+      "latency_ms": {
+        "judge_mean": 1150.0,
+        "jitrl_mean": 0.0,
+        "jitrl_max": 0.0
+      }
+    },
+    "C0": {
+      "n_records": 24,
+      "eval_success": "24/24",
+      "quality": {
+        "mean": 2.7917,
+        "sd": 1.8411,
+        "sum": 67.0,
+        "min": 1.0,
+        "max": 5.0,
+        "distribution": {
+          "1": 11,
+          "2": 1,
+          "3": 2,
+          "4": 2,
+          "5": 8
+        },
+        "verdicts": {
+          "useful": 13,
+          "neutral": 11
+        }
+      },
+      "exec_cost_usd": {
+        "total": 0.029406,
+        "mean": 0.001225
+      },
+      "eval_cost_usd": {
+        "total": 0.188448
+      },
+      "tier_vs_gt": {
+        "matches": 7,
+        "match_rate": 0.2917,
+        "misgrade_rate": 0.7083,
+        "over_provisioned": 1,
+        "under_provisioned": 16
+      },
+      "finish_reason_length": 16,
+      "empty_response_preview": 10,
+      "flips": 2,
+      "latency_ms": {
+        "judge_mean": 2311.0,
+        "jitrl_mean": 0.2444,
+        "jitrl_max": 0.6664
+      }
+    },
+    "C1": {
+      "n_records": 24,
+      "eval_success": "24/24",
+      "quality": {
+        "mean": 2.4167,
+        "sd": 1.7673,
+        "sum": 58.0,
+        "min": 1.0,
+        "max": 5.0,
+        "distribution": {
+          "1": 13,
+          "2": 2,
+          "3": 1,
+          "4": 2,
+          "5": 6
+        },
+        "verdicts": {
+          "useful": 11,
+          "neutral": 13
+        }
+      },
+      "exec_cost_usd": {
+        "total": 0.033047,
+        "mean": 0.001377
+      },
+      "eval_cost_usd": {
+        "total": 0.175652
+      },
+      "tier_vs_gt": {
+        "matches": 7,
+        "match_rate": 0.2917,
+        "misgrade_rate": 0.7083,
+        "over_provisioned": 0,
+        "under_provisioned": 17
+      },
+      "finish_reason_length": 17,
+      "empty_response_preview": 13,
+      "flips": 1,
+      "latency_ms": {
+        "judge_mean": 1100.2,
+        "jitrl_mean": 0.2233,
+        "jitrl_max": 0.4845
+      }
+    }
+  },
+  "c1_gate": {
+    "rule": "n_retrieved < min_neighbors(=3) -> z_mod=z_base, A_norm=0, chosen_tier=base_choice (native Judge)",
+    "counts": {
+      "total": 24,
+      "gated": 22,
+      "gated_no_neighbors": 18,
+      "gated_below_min_neighbors": 4,
+      "modulated": 2,
+      "modulated_and_flipped": 1
+    },
+    "gated_tasks": [
+      {
+        "task_id": "T01",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T05",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T09",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T13",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T17",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T21",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T02",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T06",
+        "n_retrieved": 1,
+        "gate_reason": "below_min_neighbors"
+      },
+      {
+        "task_id": "T10",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T14",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T18",
+        "n_retrieved": 1,
+        "gate_reason": "below_min_neighbors"
+      },
+      {
+        "task_id": "T22",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T03",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T07",
+        "n_retrieved": 2,
+        "gate_reason": "below_min_neighbors"
+      },
+      {
+        "task_id": "T11",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T15",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T19",
+        "n_retrieved": 2,
+        "gate_reason": "below_min_neighbors"
+      },
+      {
+        "task_id": "T23",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T04",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T12",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T16",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      },
+      {
+        "task_id": "T24",
+        "n_retrieved": 0,
+        "gate_reason": "no_neighbors"
+      }
+    ],
+    "modulated_tasks": [
+      {
+        "task_id": "T08",
+        "n_retrieved": 3,
+        "flipped": false,
+        "base_choice": "simple",
+        "chosen_tier": "simple"
+      },
+      {
+        "task_id": "T20",
+        "n_retrieved": 3,
+        "flipped": true,
+        "base_choice": "simple",
+        "chosen_tier": "complex"
+      }
+    ],
+    "per_task": [
+      {
+        "task_id": "T01",
+        "family": "chat_qa",
+        "gt_tier": "simple",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T05",
+        "family": "code_gen",
+        "gt_tier": "medium",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T09",
+        "family": "doc_writing",
+        "gt_tier": "medium",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T13",
+        "family": "data_analysis",
+        "gt_tier": "reasoning",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T17",
+        "family": "refactor",
+        "gt_tier": "medium",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T21",
+        "family": "info_retrieval",
+        "gt_tier": "simple",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T02",
+        "family": "chat_qa",
+        "gt_tier": "simple",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T06",
+        "family": "code_gen",
+        "gt_tier": "medium",
+        "n_retrieved": 1,
+        "min_neighbors": 3,
+        "gate_reason": "below_min_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_below_min_neighbors"
+      },
+      {
+        "task_id": "T10",
+        "family": "doc_writing",
+        "gt_tier": "medium",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T14",
+        "family": "data_analysis",
+        "gt_tier": "reasoning",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T18",
+        "family": "refactor",
+        "gt_tier": "medium",
+        "n_retrieved": 1,
+        "min_neighbors": 3,
+        "gate_reason": "below_min_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_below_min_neighbors"
+      },
+      {
+        "task_id": "T22",
+        "family": "info_retrieval",
+        "gt_tier": "reasoning",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T03",
+        "family": "chat_qa",
+        "gt_tier": "simple",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T07",
+        "family": "code_gen",
+        "gt_tier": "medium",
+        "n_retrieved": 2,
+        "min_neighbors": 3,
+        "gate_reason": "below_min_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_below_min_neighbors"
+      },
+      {
+        "task_id": "T11",
+        "family": "doc_writing",
+        "gt_tier": "reasoning",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T15",
+        "family": "data_analysis",
+        "gt_tier": "reasoning",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T19",
+        "family": "refactor",
+        "gt_tier": "reasoning",
+        "n_retrieved": 2,
+        "min_neighbors": 3,
+        "gate_reason": "below_min_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_below_min_neighbors"
+      },
+      {
+        "task_id": "T23",
+        "family": "info_retrieval",
+        "gt_tier": "complex",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T04",
+        "family": "chat_qa",
+        "gt_tier": "simple",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T08",
+        "family": "code_gen",
+        "gt_tier": "medium",
+        "n_retrieved": 3,
+        "min_neighbors": 3,
+        "gate_reason": null,
+        "modulation_active": true,
+        "flipped": false,
+        "status": "modulated"
+      },
+      {
+        "task_id": "T12",
+        "family": "doc_writing",
+        "gt_tier": "reasoning",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T16",
+        "family": "data_analysis",
+        "gt_tier": "reasoning",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      },
+      {
+        "task_id": "T20",
+        "family": "refactor",
+        "gt_tier": "reasoning",
+        "n_retrieved": 3,
+        "min_neighbors": 3,
+        "gate_reason": null,
+        "modulation_active": true,
+        "flipped": true,
+        "status": "modulated"
+      },
+      {
+        "task_id": "T24",
+        "family": "info_retrieval",
+        "gt_tier": "complex",
+        "n_retrieved": 0,
+        "min_neighbors": 3,
+        "gate_reason": "no_neighbors",
+        "modulation_active": false,
+        "flipped": false,
+        "status": "gated_no_neighbors"
+      }
+    ]
+  },
+  "c1_flips": {
+    "n_flips": 1,
+    "flips": [
+      {
+        "task_id": "T20",
+        "family": "refactor",
+        "gt_tier": "reasoning",
+        "base_choice": "simple",
+        "chosen_tier": "complex",
+        "exec_model": "CPA/OpenBMB-5.3",
+        "n_retrieved": 3,
+        "top_similarity": 1.0,
+        "V": -0.334,
+        "Q": {
+          "simple": -0.334,
+          "medium": 0.0,
+          "complex": 0.0,
+          "reasoning": 0.0
+        },
+        "A_norm": {
+          "simple": 0.0,
+          "medium": 1.0,
+          "complex": 1.0,
+          "reasoning": 1.0
+        },
+        "z_base": {
+          "simple": -0.106,
+          "medium": -3.8004,
+          "complex": -3.7313,
+          "reasoning": -7.0182
+        },
+        "z_mod": {
+          "simple": -0.106,
+          "medium": 1.1996,
+          "complex": 1.2687,
+          "reasoning": -2.0182
+        },
+        "quality_C1": 1,
+        "quality_B": 1,
+        "quality_delta": 0,
+        "exec_cost_C1_usd": 0.004725,
+        "exec_cost_B_usd": 0.000536,
+        "exec_cost_delta_usd": 0.00419,
+        "exec_finish_reason": "length",
+        "response_preview_empty": true,
+        "mechanism": {
+          "retrieved_neighbors_C1": [
+            {
+              "task_id": "T17",
+              "similarity": 1.0,
+              "stored_tier": "simple",
+              "stored_G": -0.3341
+            },
+            {
+              "task_id": "T18",
+              "similarity": 1.0,
+              "stored_tier": "simple",
+              "stored_G": -0.334
+            },
+            {
+              "task_id": "T19",
+              "similarity": 1.0,
+              "stored_tier": "simple",
+              "stored_G": -0.334
+            }
+          ],
+          "retrieved_neighbors_C0": [
+            {
+              "task_id": "T17",
+              "similarity": 1.0,
+              "stored_tier": "simple",
+              "stored_G": 0.2659
+            },
+            {
+              "task_id": "T18",
+              "similarity": 1.0,
+              "stored_tier": "simple",
+              "stored_G": -0.334
+            },
+            {
+              "task_id": "T19",
+              "similarity": 1.0,
+              "stored_tier": "complex",
+              "stored_G": -0.6
+            }
+          ],
+          "note": "Neighbors recomputed with the frozen retrieval config (k=10, Jaccard>=0.5) from the run's own memory file, using only entries written before the task. C1's gate stores gated tasks at their base tier, which changes the evidence the next same-signature task sees; the C0 column is the counterfactual evidence set."
+        }
+      }
+    ],
+    "c0_flips_for_reference": [
+      "T06",
+      "T19"
+    ],
+    "quality_delta_sum": 0,
+    "exec_cost_delta_sum_usd": 0.00419
+  },
+  "paired_bc1": {
+    "n_pairs": 24,
+    "quality": {
+      "mean_B": 2.6667,
+      "mean_C1": 2.4167,
+      "mean_delta": -0.25,
+      "improved_tasks": 0,
+      "worsened_tasks": 3,
+      "unchanged_tasks": 21
+    },
+    "exec_cost": {
+      "total_B_usd": 0.028333,
+      "total_C1_usd": 0.033047,
+      "total_delta_usd": 0.004714,
+      "total_change_pct": 16.64,
+      "savings_pct_b_c1": -16.64,
+      "attribution_usd": {
+        "modulation_flip": 0.00419,
+        "judge_base_drift": 0,
+        "same_tier_sampling": 0.000524
+      },
+      "note": "modulation_flip = JitRL changed the executed tier vs the judge base choice (attributable to C1); judge_base_drift = the judge issued a different base decision than in the B run (local llama nondeterminism, NOT attributable to C1); same_tier_sampling = same executed tier, execution sampling variance (temperature 0.7)."
+    },
+    "quality_attribution": {
+      "modulation_flip": 0,
+      "judge_base_drift": 0,
+      "same_tier_sampling": -6,
+      "note": "Sum of per-task B->C1 quality deltas by the same classification (flip / drift / same-tier)."
+    },
+    "tier_changes": {
+      "n_total": 1,
+      "modulation_flip_task_ids": [
+        "T20"
+      ],
+      "judge_base_drift_task_ids": []
+    },
+    "per_task": [
+      {
+        "task_id": "T01",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000114,
+        "exec_cost_C1_usd": 0.000124,
+        "exec_cost_delta_usd": 1e-05
+      },
+      {
+        "task_id": "T05",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000518,
+        "exec_cost_C1_usd": 0.000518,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T09",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 2,
+        "quality_delta": -3,
+        "exec_cost_B_usd": 0.000285,
+        "exec_cost_C1_usd": 0.00052,
+        "exec_cost_delta_usd": 0.000235
+      },
+      {
+        "task_id": "T13",
+        "tier_B": "complex",
+        "tier_C1": "complex",
+        "base_choice_C1": "complex",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 4,
+        "quality_C1": 2,
+        "quality_delta": -2,
+        "exec_cost_B_usd": 0.004553,
+        "exec_cost_C1_usd": 0.004553,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T17",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000521,
+        "exec_cost_C1_usd": 0.000521,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T21",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 8.2e-05,
+        "exec_cost_C1_usd": 7e-05,
+        "exec_cost_delta_usd": -1.2e-05
+      },
+      {
+        "task_id": "T02",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000166,
+        "exec_cost_C1_usd": 0.000124,
+        "exec_cost_delta_usd": -4.2e-05
+      },
+      {
+        "task_id": "T06",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000518,
+        "exec_cost_C1_usd": 0.000518,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T10",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 4,
+        "quality_delta": -1,
+        "exec_cost_B_usd": 0.00034,
+        "exec_cost_C1_usd": 0.000501,
+        "exec_cost_delta_usd": 0.000161
+      },
+      {
+        "task_id": "T14",
+        "tier_B": "medium",
+        "tier_C1": "medium",
+        "base_choice_C1": "medium",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 4,
+        "quality_C1": 4,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.001255,
+        "exec_cost_C1_usd": 0.001255,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T18",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000525,
+        "exec_cost_C1_usd": 0.000525,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T22",
+        "tier_B": "complex",
+        "tier_C1": "complex",
+        "base_choice_C1": "complex",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.004546,
+        "exec_cost_C1_usd": 0.004546,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T03",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000197,
+        "exec_cost_C1_usd": 8.7e-05,
+        "exec_cost_delta_usd": -0.00011
+      },
+      {
+        "task_id": "T07",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000521,
+        "exec_cost_C1_usd": 0.000521,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T11",
+        "tier_B": "medium",
+        "tier_C1": "medium",
+        "base_choice_C1": "medium",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 3,
+        "quality_C1": 3,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.001239,
+        "exec_cost_C1_usd": 0.001239,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T15",
+        "tier_B": "medium",
+        "tier_C1": "medium",
+        "base_choice_C1": "medium",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000963,
+        "exec_cost_C1_usd": 0.001193,
+        "exec_cost_delta_usd": 0.00023
+      },
+      {
+        "task_id": "T19",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000536,
+        "exec_cost_C1_usd": 0.000536,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T23",
+        "tier_B": "complex",
+        "tier_C1": "complex",
+        "base_choice_C1": "complex",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.00455,
+        "exec_cost_C1_usd": 0.00455,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T04",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 5,
+        "quality_C1": 5,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000221,
+        "exec_cost_C1_usd": 0.000273,
+        "exec_cost_delta_usd": 5.2e-05
+      },
+      {
+        "task_id": "T08",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000522,
+        "exec_cost_C1_usd": 0.000522,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T12",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000538,
+        "exec_cost_C1_usd": 0.000538,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T16",
+        "tier_B": "simple",
+        "tier_C1": "simple",
+        "base_choice_C1": "simple",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000534,
+        "exec_cost_C1_usd": 0.000534,
+        "exec_cost_delta_usd": 0.0
+      },
+      {
+        "task_id": "T20",
+        "tier_B": "simple",
+        "tier_C1": "complex",
+        "base_choice_C1": "simple",
+        "flipped": true,
+        "classification": "modulation_flip",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.000536,
+        "exec_cost_C1_usd": 0.004725,
+        "exec_cost_delta_usd": 0.00419
+      },
+      {
+        "task_id": "T24",
+        "tier_B": "complex",
+        "tier_C1": "complex",
+        "base_choice_C1": "complex",
+        "flipped": false,
+        "classification": "same_tier_sampling",
+        "quality_B": 1,
+        "quality_C1": 1,
+        "quality_delta": 0,
+        "exec_cost_B_usd": 0.004553,
+        "exec_cost_C1_usd": 0.004553,
+        "exec_cost_delta_usd": 0.0
+      }
+    ]
+  },
+  "c0_to_c1": {
+    "quality_mean": {
+      "C0": 2.7917,
+      "C1": 2.4167,
+      "delta": -0.375
+    },
+    "exec_cost_total_usd": {
+      "C0": 0.029406,
+      "C1": 0.033047,
+      "delta": 0.003642,
+      "change_pct": 12.38
+    },
+    "flips": {
+      "C0": 2,
+      "C1": 1
+    },
+    "tier_changes": [
+      {
+        "task_id": "T13",
+        "tier_C0": "simple",
+        "tier_C1": "complex",
+        "c0_flipped": false,
+        "c1_flipped": false,
+        "cause": "judge base decision differs between the C0 and C1 runs"
+      },
+      {
+        "task_id": "T06",
+        "tier_C0": "complex",
+        "tier_C1": "simple",
+        "c0_flipped": true,
+        "c1_flipped": false,
+        "cause": "C0 modulation flip suppressed by the C1 gate"
+      },
+      {
+        "task_id": "T22",
+        "tier_C0": "medium",
+        "tier_C1": "complex",
+        "c0_flipped": false,
+        "c1_flipped": false,
+        "cause": "judge base decision differs between the C0 and C1 runs"
+      },
+      {
+        "task_id": "T19",
+        "tier_C0": "complex",
+        "tier_C1": "simple",
+        "c0_flipped": true,
+        "c1_flipped": false,
+        "cause": "C0 modulation flip suppressed by the C1 gate"
+      },
+      {
+        "task_id": "T20",
+        "tier_C0": "simple",
+        "tier_C1": "complex",
+        "c0_flipped": false,
+        "c1_flipped": true,
+        "cause": "C1 modulation flip (new vs C0)"
+      }
+    ]
+  },
+  "judge_drift": {
+    "c1_base_vs_b_chosen_mismatches": [],
+    "c1_base_vs_b_consistent": true,
+    "c1_base_vs_c0_base_mismatches": [
+      {
+        "task_id": "T13",
+        "C0_base": "simple",
+        "C1_base": "complex"
+      },
+      {
+        "task_id": "T22",
+        "C0_base": "medium",
+        "C1_base": "complex"
+      }
+    ],
+    "note": "The C1 run's judge reproduced the B run's base decision on all 24 tasks (no drift vs B). The C0 run had drifted on T13/T22 relative to B; those tasks list here as C0-vs-C1 base differences because C1 matched B instead of C0."
+  },
+  "memory_retrieval": {
+    "memory_entries_final": 24,
+    "memory_written": 24,
+    "tasks_with_retrieval": 6,
+    "retrieval_task_ids": [
+      "T06",
+      "T18",
+      "T07",
+      "T19",
+      "T08",
+      "T20"
+    ],
+    "avg_n_retrieved_when_hit": 2.0,
+    "top_similarity_when_hit": [
+      1.0
+    ],
+    "flips_among_retrieval_hits": 1,
+    "memory_entry_keys": [
+      "G",
+      "episode_id",
+      "intent_class",
+      "signature_tokens",
+      "tier",
+      "ts"
+    ]
+  },
+  "truncation_empty_response": {
+    "B": {
+      "finish_reason_length": 16,
+      "empty_response_preview": 12
+    },
+    "C0": {
+      "finish_reason_length": 16,
+      "empty_response_preview": 10
+    },
+    "C1": {
+      "finish_reason_length": 17,
+      "empty_response_preview": 13
+    }
+  },
+  "file_summaries": {
+    "B": {
+      "mode": "B",
+      "judge": "llama",
+      "episodes": 1,
+      "n_records": 24,
+      "accuracy_vs_gt": 0.2916666666666667,
+      "flips": 0,
+      "memory_size": 0,
+      "memory_written": 0,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "avg_quality_score": 2.6666666666666665,
+      "verdicts": {
+        "useful": 11,
+        "harmful": 1,
+        "neutral": 12
+      },
+      "avg_exec_cost_usd": 0.0011805541666666667,
+      "total_exec_cost_usd": 0.028333300000000002,
+      "total_eval_cost_usd": 0.1799,
+      "avg_reward_real": 0.11575304842470428,
+      "avg_judge_latency_ms": 1150.016412500084,
+      "avg_jitrl_latency_ms": 0.0
+    },
+    "C0": {
+      "mode": "C",
+      "judge": "llama",
+      "episodes": 1,
+      "n_records": 24,
+      "accuracy_vs_gt": 0.2916666666666667,
+      "flips": 2,
+      "memory_size": 24,
+      "memory_written": 24,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "avg_quality_score": 2.7916666666666665,
+      "verdicts": {
+        "useful": 13,
+        "harmful": 0,
+        "neutral": 11
+      },
+      "avg_exec_cost_usd": 0.0012252295833333334,
+      "total_exec_cost_usd": 0.029405510000000003,
+      "total_eval_cost_usd": 0.188448,
+      "avg_reward_real": 0.15123631843577987,
+      "avg_judge_latency_ms": 2311.0389000000473,
+      "avg_jitrl_latency_ms": 0.24436666660676565
+    },
+    "C1": {
+      "mode": "C",
+      "judge": "llama",
+      "episodes": 1,
+      "n_records": 24,
+      "config_snapshot": {
+        "k": 10,
+        "beta": 5.0,
+        "lam": 0.05,
+        "alpha": 5.0,
+        "jaccard_threshold": 0.5,
+        "z_min": -10.0,
+        "memory_cap": 5000,
+        "seed": 42,
+        "min_neighbors": 3
+      },
+      "modulated_records": 2,
+      "gated_records": 22,
+      "accuracy_vs_gt": 0.2916666666666667,
+      "flips": 1,
+      "memory_size": 24,
+      "memory_written": 24,
+      "eval_success": "24/24",
+      "eval_success_rate": 1.0,
+      "avg_quality_score": 2.4166666666666665,
+      "verdicts": {
+        "useful": 11,
+        "harmful": 0,
+        "neutral": 13
+      },
+      "avg_exec_cost_usd": 0.0013769604166666667,
+      "total_exec_cost_usd": 0.03304705,
+      "total_eval_cost_usd": 0.175652,
+      "avg_reward_real": 0.02967098006253729,
+      "avg_judge_latency_ms": 1100.2129583334106,
+      "avg_jitrl_latency_ms": 0.2233208332806195
+    }
+  },
+  "notes": [
+    "Judged strictly against docs/S2-C1-PREREGISTRATION.md v1.0 (frozen before the run); no criterion was added, removed or re-tuned.",
+    "P2's '-0.3/5' is 0.3 points on the 5-point quality scale, identical to the frozen D10 quality criterion (mean q(C1) - mean q(B) >= -0.3).",
+    "The D10 recomputation here is INFORMATIONAL for C1 only and does NOT replace or amend the frozen formal C0 D10 judgment in eval/results-summary.json.",
+    "Exec cost is judged on execution-cost totals; the blind evaluator budget (eval_cost_usd) is measurement overhead, reported separately.",
+    "B jitrl_latency_ms=0.0 is the documented 'no JitRL post-processing' sentinel, so P4 is judged on C1's own max jitrl_latency_ms.",
+    "Same-tier B->C1 cost/quality deltas are execution sampling variance (same model, temperature 0.7); only modulation flips are attributable to JitRL, and judge base drift is attributable to the local llama judge's run-to-run nondeterminism."
+  ],
+  "p1_p5": {
+    "definition_status": "P1-P5 exactly as frozen in docs/S2-C1-PREREGISTRATION.md v1.0 Section 4; judged as written on the formal n=24 runs.",
+    "P1": {
+      "criterion": "P1 exec cost: C1 total <= B + $0.001",
+      "B_total_usd": 0.028333,
+      "C1_total_usd": 0.033047,
+      "limit_usd": 0.029333,
+      "delta_usd": 0.004714,
+      "met": false
+    },
+    "P2": {
+      "criterion": "P2 quality: mean q(C1) - mean q(B) >= -0.3 (0.3/5)",
+      "B_mean": 2.6667,
+      "C1_mean": 2.4167,
+      "delta": -0.25,
+      "met": true
+    },
+    "P3": {
+      "criterion": "P3 misgrade rate: C1 <= B + 5pp",
+      "B_misgrade_rate": 0.7083,
+      "C1_misgrade_rate": 0.7083,
+      "diff_pp": 0.0,
+      "met": true
+    },
+    "P4": {
+      "criterion": "P4 JitRL latency: max jitrl_latency_ms <= 500 ms",
+      "max_jitrl_ms": 0.4845,
+      "met": true
+    },
+    "P5": {
+      "criterion": "P5 flip harmlessness: each flip quality >= B same task AND cost <= B same task + $0.001; 0 flips trivially pass",
+      "n_flips": 1,
+      "trivially_met": false,
+      "flip_checks": [
+        {
+          "task_id": "T20",
+          "quality_C1": 1,
+          "quality_B": 1,
+          "quality_ok": true,
+          "exec_cost_C1_usd": 0.004725,
+          "exec_cost_B_usd": 0.000536,
+          "cost_limit_usd": 0.001536,
+          "cost_ok": false,
+          "met": false
+        }
+      ],
+      "met": false
+    },
+    "n_criteria_met": 3,
+    "failed": [
+      "P1",
+      "P5"
+    ],
+    "verdict": "NOT PASSING (P1, P5 failed)"
+  },
+  "d10_informational": {
+    "informational_only": true,
+    "disclaimer": "Informational recomputation for C1. Does NOT replace the frozen formal C0 D10 judgment (eval/results-summary.json: C0 = 3/4, NOT MET, savings -3.78%).",
+    "criteria": [
+      {
+        "criterion": "D10-1 C1 vs B exec cost savings >= 20% ((B-C1)/B)",
+        "savings_pct": -16.64,
+        "met": false
+      },
+      {
+        "criterion": "D10-2 quality: C1 - B >= -0.3",
+        "delta": -0.25,
+        "met": true
+      },
+      {
+        "criterion": "D10-3 C1 misgrade rate <= B misgrade rate + 5pp",
+        "diff_pp": 0.0,
+        "met": true
+      },
+      {
+        "criterion": "D10-4 JitRL post-processing latency <= 500 ms",
+        "max_jitrl_ms": 0.4845,
+        "met": true
+      }
+    ],
+    "n_criteria_met": 3,
+    "verdict": "NOT MET (informational, n=24)"
+  },
+  "prereg_predictions": {
+    "source": "docs/S2-C1-PREREGISTRATION.md v1.0 Section 5 (falsifiable run-before predictions; reported as-is)",
+    "predictions": [
+      {
+        "prediction": "n=1/2 tasks T06/T18/T07/T19 are gated",
+        "actual_gated_below_min": [
+          "T06",
+          "T07",
+          "T18",
+          "T19"
+        ],
+        "holds": true
+      },
+      {
+        "prediction": "C0's T06/T19 flips are suppressed",
+        "actual": [
+          "T06",
+          "T19"
+        ],
+        "holds": true
+      },
+      {
+        "prediction": "n=3 tasks T08/T20 remain modulated",
+        "actual_modulated": [
+          "T08",
+          "T20"
+        ],
+        "holds": true
+      },
+      {
+        "prediction": "flips drop from 2 to 0",
+        "actual_n_flips": 1,
+        "actual_flip_task_ids": [
+          "T20"
+        ],
+        "holds": false
+      },
+      {
+        "prediction": "quality roughly unchanged (near B)",
+        "actual_quality_delta_vs_B": -0.25,
+        "numeric_threshold_in_prereg": null,
+        "note": "qualitative prediction; -0.25 is within the P2 floor (-0.3) but is a visible drop (sum -6 over 24 tasks), entirely from same-tier sampling variance",
+        "holds": true
+      },
+      {
+        "prediction": "exec cost near B (P1 margin)",
+        "actual_exec_delta_usd": 0.004714,
+        "holds": false
+      }
+    ],
+    "n_holding": 4
+  },
+  "outputs": {
+    "charts": [
+      "eval\\c1\\charts\\bc1-paired-exec-cost.svg",
+      "eval\\c1\\charts\\cost-comparison.svg",
+      "eval\\c1\\charts\\gate-modulation.svg",
+      "eval\\c1\\charts\\quality-comparison.svg"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+# Multi-tier grammar for the judge: the model may only emit one tier name
+# wrapped in <tier>...</tier>. Constrains sampling only — reported logprobs
+# remain the raw (unmasked) distribution (verified in S1 probe).
+root ::= "<tier>" ("simple" | "medium" | "complex" | "reasoning") "</tier>"

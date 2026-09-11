@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1020" height="480" viewBox="0 0 1020 480" font-family="Helvetica,Arial,sans-serif">
+<rect width="1020" height="480" fill="white"/>
+<text x="510.0" y="26" font-size="17" font-weight="bold" text-anchor="middle">C learning curve: quality by sequence position (order confounded by task difficulty)</text>
+<line x1="70" y1="416.0" x2="870" y2="416.0" stroke="#e5e7eb"/>
+<text x="62" y="420.0" font-size="11" text-anchor="end">0.00</text>
+<line x1="70" y1="344.0" x2="870" y2="344.0" stroke="#e5e7eb"/>
+<text x="62" y="348.0" font-size="11" text-anchor="end">1.00</text>
+<line x1="70" y1="272.0" x2="870" y2="272.0" stroke="#e5e7eb"/>
+<text x="62" y="276.0" font-size="11" text-anchor="end">2.00</text>
+<line x1="70" y1="200.0" x2="870" y2="200.0" stroke="#e5e7eb"/>
+<text x="62" y="204.0" font-size="11" text-anchor="end">3.00</text>
+<line x1="70" y1="128.0" x2="870" y2="128.0" stroke="#e5e7eb"/>
+<text x="62" y="132.0" font-size="11" text-anchor="end">4.00</text>
+<line x1="70" y1="56.0" x2="870" y2="56.0" stroke="#e5e7eb"/>
+<text x="62" y="60.0" font-size="11" text-anchor="end">5.00</text>
+<text x="16" y="236.0" font-size="12" text-anchor="middle" transform="rotate(-90 16 236.0)">quality score</text>
+<polyline points="70.0,56.1 104.8,344.0 139.6,56.1 174.3,128.1 209.1,200.0 243.9,56.1 278.7,56.1 313.5,344.0 348.3,56.1 383.0,128.1 417.8,344.0 452.6,272.0 487.4,56.1 522.2,344.0 557.0,200.0 591.7,56.1 626.5,344.0 661.3,344.0 696.1,56.1 730.9,344.0 765.7,344.0 800.4,344.0 835.2,344.0 870.0,344.0" fill="none" stroke="#f59e0b" stroke-width="2"/>
+<circle cx="70.0" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="104.8" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="139.6" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="174.3" cy="128.1" r="3.5" fill="#f59e0b"/>
+<circle cx="209.1" cy="200.0" r="3.5" fill="#f59e0b"/>
+<circle cx="243.9" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="278.7" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="313.5" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="348.3" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="383.0" cy="128.1" r="3.5" fill="#f59e0b"/>
+<circle cx="417.8" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="452.6" cy="272.0" r="3.5" fill="#f59e0b"/>
+<circle cx="487.4" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="522.2" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="557.0" cy="200.0" r="3.5" fill="#f59e0b"/>
+<circle cx="591.7" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="626.5" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="661.3" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="696.1" cy="56.1" r="3.5" fill="#f59e0b"/>
+<circle cx="730.9" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="765.7" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="800.4" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="835.2" cy="344.0" r="3.5" fill="#f59e0b"/>
+<circle cx="870.0" cy="344.0" r="3.5" fill="#f59e0b"/>
+<line x1="886" y1="76" x2="916" y2="76" stroke="#f59e0b" stroke-width="2"/>
+<text x="922" y="80" font-size="12">quality per task</text>
+<polyline points="70.0,155.1 104.8,155.1 139.6,155.1 174.3,155.1 209.1,155.1 243.9,155.1 278.7,155.1 313.5,155.1 348.3,182.0 383.0,182.0 417.8,182.0 452.6,182.0 487.4,182.0 522.2,182.0 557.0,182.0 591.7,182.0 626.5,308.0 661.3,308.0 696.1,308.0 730.9,308.0 765.7,308.0 800.4,308.0 835.2,308.0 870.0,308.0" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4"/>
+<line x1="886" y1="96" x2="916" y2="96" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="922" y="100" font-size="12">tertile mean</text>
+<text x="70.0" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 70.0 434)">1:T01</text>
+<text x="139.6" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 139.6 434)">3:T09</text>
+<text x="209.1" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 209.1 434)">5:T17</text>
+<text x="278.7" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 278.7 434)">7:T02</text>
+<text x="348.3" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 348.3 434)">9:T10</text>
+<text x="417.8" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 417.8 434)">11:T18</text>
+<text x="487.4" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 487.4 434)">13:T03</text>
+<text x="557.0" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 557.0 434)">15:T11</text>
+<text x="626.5" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 626.5 434)">17:T19</text>
+<text x="696.1" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 696.1 434)">19:T04</text>
+<text x="765.7" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 765.7 434)">21:T12</text>
+<text x="835.2" y="434" font-size="10" text-anchor="middle" transform="rotate(-45 835.2 434)">23:T20</text>
+</svg>
