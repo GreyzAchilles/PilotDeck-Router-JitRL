@@ -20,6 +20,34 @@ TIER_TO_MODEL: dict[str, str] = {
     "complex": "CPA/OpenBMB-5.3",
 }
 
+#: Switched tier map (S4-M2 prereg amendment v1.1, 2026-09-12): infra-forced.
+#: The CPA relay lost opencode-v4-flash upstream (HTTP 400 "unknown provider",
+#: permanent) and the 5h usage limit exhausted the glm-5.3-flash / glm-5.3
+#: credential pools until 14:27. simple+reasoning move to provider1; medium+
+#: complex stay on CPA's live models. Pricing = proxy classes (same role ->
+#: same price class as the spec model replaced; documented approximation,
+#: applied identically to all arms, so arm comparisons stay internally valid).
+SWITCHED_TIER_TO_MODEL: dict[str, str] = {
+    "simple": "provider1/deepseek-v4-flash-vision-exp",
+    "medium": "CPA/tokendance-v4.1-flash",
+    "reasoning": "provider1/glm-5.3",
+    "complex": "CPA/OpenBMB-5.3",
+}
+
+TIER_MAPS: dict[str, dict[str, str]] = {
+    "spec": TIER_TO_MODEL,
+    "switched": SWITCHED_TIER_TO_MODEL,
+}
+
+
+def get_tier_to_model(name: str = "spec") -> dict[str, str]:
+    """Select a tier->model map by name (default: the frozen spec map)."""
+    try:
+        return TIER_MAPS[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown tier map: {name!r} (known: {sorted(TIER_MAPS)})") from None
+
 #: static/default routing (mode A) -> CPA/glm-5.3
 DEFAULT_MODEL = "CPA/glm-5.3"
 

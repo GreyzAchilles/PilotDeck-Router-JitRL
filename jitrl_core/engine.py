@@ -19,14 +19,20 @@ class JudgeClient(Protocol):
 from __future__ import annotations
 
 import random
-import time
 from dataclasses import dataclass, field
 from typing import Protocol, TypedDict
 
 from jitrl_core.config import JitRLConfig, TIERS
+from jitrl_core.credit import CreditAssigner, IdentityCreditAssigner
 from jitrl_core.memory import ExperienceMemory
 from jitrl_core.policy import choose_tier, clamp_logits, modulate_logits
 from jitrl_core.state import intent_class, signature_token_set, task_signature
+from jitrl_core.types import RouteTrajectory, TrajectoryEvaluation
+from jitrl_core.updater import (
+    DirectMemoryUpdater,
+    MemoryUpdater,
+    build_entry,
+)
 from jitrl_core.value import estimate_values
 
 
@@ -84,11 +90,20 @@ class JitRLEngine:
         self,
         config: JitRLConfig | None = None,
         memory: ExperienceMemory | None = None,
+        *,
+        credit_assigner: CreditAssigner | None = None,
+        memory_updater: MemoryUpdater | None = None,
     ):
         self.config = config or JitRLConfig()
-        self.memory = memory or ExperienceMemory(cap=self.config.memory_cap)
+        # NOTE: explicit None check — ExperienceMemory defines __len__, so an
+        # empty (but valid) injected memory is falsy and must not be replaced.
+        self.memory = (memory if memory is not None
+                       else ExperienceMemory(cap=self.config.memory_cap))
         # engine-owned seeded rng for the lambda exploration branch
         self._rng = random.Random(self.config.seed)
+        # M1 trajectory loop (defaults reproduce legacy single-step behavior)
+        self._credit_assigner = credit_assigner
+        self._memory_updater = memory_updater
 
     # ------------------------------------------------------------------ decide
     def decide(self, user_message: str, tier_logits: dict[str, float]) -> DecisionResult:
@@ -167,14 +182,14 @@ class JitRLEngine:
     ) -> dict:
         """Episode ended: append {intent_class, signature_tokens(sorted), tier,
         G, ts, episode_id}; memory enforces the cap (drop oldest)."""
-        entry = {
-            "intent_class": intent,
-            "signature_tokens": sorted(signature_tokens),
-            "tier": tier,
-            "G": float(reward),
-            "ts": float(ts) if ts is not None else time.time(),
-            "episode_id": episode_id,
-        }
+        entry = build_entry(
+            intent=intent,
+            signature_tokens=signature_tokens,
+            tier=tier,
+            reward=reward,
+            episode_id=episode_id,
+            ts=ts,
+        )
         self.memory.add(entry)
         return entry
 
@@ -207,3 +222,26 @@ class JitRLEngine:
         return self.update_from_message(
             user_message, chosen_tier, reward, episode_id, ts=ts
         )
+
+    # ------------------------------------------------------- learn_trajectory
+    def learn_trajectory(
+        self,
+        trajectory: RouteTrajectory,
+        evaluation: TrajectoryEvaluation,
+        *,
+        credit_assigner: CreditAssigner | None = None,
+        updater: MemoryUpdater | None = None,
+    ) -> list[dict]:
+        """Trajectory-level learn (M1): credit assignment -> memory update.
+
+        Single-step trajectory + identity credit + DirectMemoryUpdater
+        reproduces learn() exactly: one frozen 6-key entry with G == r,
+        appended to memory in step order. Consumes no RNG (decide()'s RNG
+        stream is unaffected). A failed evaluation (ok=False) writes
+        nothing — same policy as the legacy single-step path."""
+        ca = credit_assigner or self._credit_assigner or IdentityCreditAssigner()
+        up = updater or self._memory_updater or DirectMemoryUpdater()
+        credits = ca.assign(trajectory, evaluation)
+        if not credits:
+            return []
+        return up.update(self.memory, credits, trajectory, evaluation)

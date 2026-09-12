@@ -1,13 +1,14 @@
 # PilotDeck-Router-JitRL
 
 > **Just-In-Time Reinforcement Learning（JitRL，面向 LLM agent 的无梯度持续学习）× PilotDeck Router 的 TokenSaver Judge**
-> 冻结本地 Judge 权重，维护非参数 `(state, tier, reward)` 记忆，检索相似历史经验估计 V/Q/优势，再对 Judge 的四档 logit 做闭式更新——填补 Router 的**跨轮经验真空**，让路由器跨轮学习，而不是每轮从零开始、重复犯同样的错误。
+> 冻结本地 Judge 权重，维护**轨迹级非参数记忆**：完整路由轨迹结束后由轨迹级盲评评估器复盘整条轨迹，逐步信用分配后经 active/provisional/quarantine 生命周期准入写回记忆；在线阶段检索相似历史经验估计 V/Q/优势，再对 Judge 的四档 logit 做闭式更新——填补 Router 的**跨轮经验真空**，让路由器跨轮学习，而不是每轮从零开始、重复犯同样的错误。
 
 ```text
-z′(tier) = z(tier) + β · Â(tier)     # 对冻结 Judge 的 simple / medium / complex / reasoning 四档 logit 做闭式更新
+z′(tier) = z(tier) + β · Â(tier)              # 在线：对冻结 Judge 的四档 logit 做闭式更新
+G_t      = r_t + η·Σ γ^(k−t)·r_k              # 离线：轨迹结束后的逐步信用分配（γ=0.8, η=0.5）
 ```
 
-本仓库是一个**纯标准库（stdlib-only）的独立 Python harness**：不依赖 PilotDeck 启动链路，但**逐项忠实复刻 Router 的决策路径**（相同的 judge prompt 格式、四档体系、previousTier 续轮规则），在真实执行模型调用（经 PilotDeck provider 配置）与盲评 Evaluator 下完成了 A/B/C0/C1 预注册对照实验与 T8 机制消融。目标：保住回答质量的同时降低模型调用成本。
+本仓库是一个**纯标准库（stdlib-only）的独立 Python harness**：不依赖 PilotDeck 启动链路，但**逐项忠实复刻 Router 的决策路径**（相同的 judge prompt 格式、四档体系、previousTier 续轮规则），在真实执行模型调用（经 PilotDeck provider 配置）与盲评 Evaluator 下完成了 A/B/C0/C1 预注册对照实验与 T8 机制消融；Session 4 将记忆更新回路重写为论文式轨迹级闭环（M1/M2），三臂对照实验 S4-M2 已预注册。目标：保住回答质量的同时降低模型调用成本。
 
 **诚实结论先行**：端到端管线完全可行，JitRL 后处理开销近零（mean 0.2444ms / max 0.6664ms）；但默认 C0 **未达到 ≥20% 的成本目标**（D10 判定 3/4），C1 保守门控也**未通过预注册判据**（3/5，且出现记忆级联），T8 消融显示当前 1B Judge 几乎不利用注入的记忆（0/6 影响）。本项目把「带机理分析的诚实负结果」当作一等公民，全部数字为冻结口径，见[实验](#5-实验)与[诚实结论](#6-诚实结论)。
 
@@ -71,34 +72,56 @@ JitRL 恰好补上这一块。映射关系：
 
 ![architecture](diagrams/architecture.svg)
 
-`jitrl_core.engine` 的在线闭环：**retrieve → estimate → gate/modulate → choose → learn**——检索相似经验、估计 V/Q/Â、（C1）邻域门控、对四档 logit 做闭式调制后 argmax 选档；episode 结束把 `(state, tier, reward)` 写回记忆。
+**两个闭环**（`jitrl_core`）：
+
+```text
+在线决策环（每轮，微秒级）          离线学习环（每轨迹结束，一次评估调用）
+┌─────────────────────────┐        ┌──────────────────────────────────────┐
+│ retrieve（top-k Jaccard）│        │ RouteTrajectory（step=真实路由决策）  │
+│ → estimate V/Q/Â         │        │ → TrajectoryLevelEvaluator 盲评复盘   │
+│ → gate（C1 可选邻域门控） │   ──▶  │   （episode 评价 + 逐步路由判定）     │
+│ → modulate z′=z+β·Â      │ 写回   │ → CreditAssigner 逐步信用分配        │
+│ → choose（argmax）        │        │   （identity G=r / discounted）       │
+└─────────────────────────┘        │ → MemoryUpdater 生命周期准入          │
+                                   │   （active/provisional/quarantine）   │
+                                   └──────────────────────────────────────┘
+```
+
+- **在线决策环**：检索相似经验、估计 V/Q/Â、（C1）邻域门控、对四档 logit 做闭式调制后 argmax 选档——数学与冻结口径完全一致，JitRL 后处理开销 0.2–0.7ms；
+- **离线学习环（Session 4 重写）**：一个可学习 step = 一次真实路由决策（不是 token、不是工具调用）。轨迹结束后，轨迹级评估器**一次调用**输出 episode 评价与每轮 `routing_verdict / local_quality / recommended_tier / failure_tags / confidence`；确定性代码用同一 D3 公式（`0.6·quality + 0.3·cost_saving`）逐轮合成 reward；`DiscountedCreditAssigner`（`G_t = r_t + η·Σγ^(k−t)·r_k`，η<1 防止后步补救洗掉前步误路由）计算逐步回报；`LifecycleMemoryUpdater` 按评估器置信度分流——`≥0.80` active（可检索）、`≥0.60` provisional（保留审计、不参与调制）、否则 quarantine。**失败语义按轨迹**：任一轮执行失败或评估失败 → 整条轨迹零记忆写入。
 
 ![arms](diagrams/arms.svg)
 
 | 模块 | 内容 |
 |---|---|
-| `jitrl_core/` | engine（retrieve → estimate → gate/modulate → choose → learn）、memory（top-k Jaccard 检索）、state（intent_class + 规则归一化签名 + CJK bigram）、value（V/Q/Â，含 λ 探索）、policy（clamp / modulate / argmax）、config（冻结超参） |
+| `jitrl_core/` | engine（decide + learn_trajectory）、state（intent_class + 规则归一化签名 + CJK bigram）、memory（top-k Jaccard 检索 + `LifecycleMemory` 生命周期 sidecar）、value（V/Q/Â，含 λ 探索）、policy（clamp / modulate / argmax）、**types（`DecisionStep`/`RouteTrajectory`/`StepEvaluation`/`TrajectoryEvaluation`）**、**credit（`IdentityCreditAssigner` / `DiscountedCreditAssigner`）**、**updater（`build_entry` 冻结六键构造 / `DirectMemoryUpdater` / `LifecycleMemoryUpdater`）**、config（冻结超参） |
 | `local_judge/` | 面向 llama.cpp 的生产 JudgeClient：**Method B 硬化 logit 提取**（四档各一次 grammar-forced 请求、共 4 次；canonical tokenization 校验 + 重试阶梯 + `Z_MIN=−10` clamp）、GBNF grammar、逐字节复刻 PilotDeck `generateJudgePrompt` |
-| `harness/` | `run.py`（routing-only A/B/C）、`run_real.py`（真实 episode A/B/C/C1：provider 执行 + Evaluator + reward + 记忆写回）、`run_ablation.py`（T8-LM vs T8-PM）、`cpa_client.py`（运行时读取 PilotDeck 配置中的 OpenAI 兼容 provider 凭据）、`evaluator.py`（盲评结构化评估）、`real_rewards.py`、`pricing.py` |
-| `eval/` | 任务集 `tasks.jsonl`、`tasks-meta.md`、`pricing.json`、分析器（`analyze_results.py` / `analyze_c1.py` / `analyze_ablation.py` / `run_continuation_probes.py`）与冻结聚合资产（见 §10） |
+| `harness/` | `run.py`（routing-only A/B/C）、`run_real.py`（真实 episode A/B/C/C1 + **`--arm T1/T2/T3` 记忆更新臂 + `--tier-map spec/switched` 档位映射**）、**`trajectory.py`（`TrajectoryEvaluator` terminal/per_step 双模式 + 记忆更新适配器）**、**`multiturn.py`（traj_id 分组 + 会话历史构建）**、`run_ablation.py`（T8-LM vs T8-PM）、`cpa_client.py`（运行时读取 PilotDeck 配置中的 OpenAI 兼容 provider 凭据）、`evaluator.py`（盲评结构化评估 + **`TrajectoryLevelEvaluator` 轨迹级复盘**）、`real_rewards.py`、`pricing.py`（spec/switched 双映射 + 计价表） |
+| `eval/` | 任务集 `tasks.jsonl`（24+5）、**`multiturn_tasks.jsonl`（8 轨迹 28 轮）**、`tasks-meta.md`、`pricing.json`、分析器与冻结聚合资产（见 §10） |
 | `diagrams/` | 4 张技术 SVG：`architecture.svg`、`arms.svg`（本节）、`online-offline.svg`、`pilotdeck-integration.svg` |
 | `demo/` | Web Demo（离线优先，见 [§8](#8-web-demo)） |
+| `docs/optimization/` | Session 4 优化线正本：`MEMORY-LOOP-DECISIONS.md`（M1/M2 设计冻结）、`SESSION-4-PROGRESS.md`、`S4-M2-PREREGISTRATION.md`（三臂预注册 v1.1） |
 
 **关键工程细节**
 
 - **Method B logit 提取**：llama.cpp 的 GBNF 只掩码采样、`top_logprobs` 返回的是掩码前分布，且 `reasoning` 在该词表是 2 个 token——单请求读不齐四档。生产客户端对四档**各做一次单档 grammar-forced 请求**，取档位名 canonical token 路径的 logprob 之和，附校验/重试/clamp(−10) 阶梯。每次判档 = 4 个本地请求，mean ≈2.3s。
 - **b10903 `reasoning_content` 兼容**：llama-server build b10903 会把 grammar-forced 输出路由进 `message.reasoning_content` 而 `content` 为空；客户端同时处理 `content` 与 `reasoning_content`（已文档化的兼容修复，token 路径与 logprob 不变）。
 - **延迟分离计量**：Judge 的 4 请求延迟（≈2.3s mean）与 JitRL 后处理延迟（mean 0.2444ms / max 0.6664ms）**分开插桩**，绝不混报。
+- **轨迹级评估器的盲评边界（M2）**：评估器可见每轮**路由档位**（判断 under/over-routed 必需）但**不可见**执行模型名、价格与 usage——D8「评估器不评自己」原则保持；steps 数必须等于轮数、turn_index 对位、枚举合法，任一校验失败即整条轨迹零写入。
+- **冻结契约零破坏（M1/M2 重写约束）**：memory entry 六键 schema（`intent_class/signature_tokens/tier/G/ts/episode_id`）不变，生命周期与语义反馈（verdict/recommended_tier/failure_tags/feedback/confidence）存 `LifecycleMemory` sidecar；`decide()` 的数值路径与 RNG 位相不变（单步轨迹 + identity 信用与旧 `learn()` 逐位等价，测试锁定）；record schema 仅加法扩展（`traj_id/n_steps/turn_index/n_turns/arm`）。
 
 ## 3. 仓库结构
 
 ```text
 PilotDeck-Router-JitRL/
-├── jitrl_core/     # JitRL 引擎：state / memory / value / policy / engine / config（+ tests）
+├── jitrl_core/     # JitRL 引擎：state / memory（含 LifecycleMemory）/ value / policy / engine /
+│                   #   types（轨迹契约）/ credit（信用分配）/ updater（记忆更新）/ config（+ tests）
 ├── local_judge/    # 生产 JudgeClient（Method B）、GBNF grammar、探针（+ tests）
-├── harness/        # run / run_real / run_ablation / cpa_client / evaluator / real_rewards /
-│                   #   pricing / separability（+ tests，testdata/）
-├── eval/           # tasks.jsonl（24 主任务 + 5 续轮探针）、tasks-meta.md、pricing.json、
+├── harness/        # run / run_real（--arm T1/T2/T3 + --tier-map）/ trajectory / multiturn /
+│                   #   run_ablation / cpa_client / evaluator（含 TrajectoryLevelEvaluator）/
+│                   #   real_rewards / pricing / separability（+ tests，testdata/）
+├── eval/           # tasks.jsonl（24 主任务 + 5 续轮探针）、multiturn_tasks.jsonl（8 轨迹 28 轮）、
+│                   #   tasks-meta.md、pricing.json、
 │                   #   analyze_results / analyze_c1 / analyze_ablation / run_continuation_probes、
 │                   #   冻结聚合：results-summary.json、results-tasks.csv、charts/（5 SVG）、
 │                   #   c1/（summary + CSV + 4 SVG）、ablation/（冻结 memory trace + SHA-256 +
@@ -106,7 +129,7 @@ PilotDeck-Router-JitRL/
 ├── diagrams/       # architecture.svg / arms.svg / online-offline.svg / pilotdeck-integration.svg
 ├── demo/           # Web Demo（离线优先）
 ├── integrations/   # PilotDeck 集成 MVP 交付物：patch + overlay + verify.py（见 §9）
-├── docs/           # 设计文档
+├── docs/           # 设计文档 + optimization/（Session 4 记忆回路优化线正本）
 ├── logs/           # 实验日志（gitignore；正式命名见 §10）
 └── PilotDeck-src/  # 上游 PilotDeck 源码快照（决策路径复刻的对照基准）
 ```
@@ -139,10 +162,12 @@ harness 在**运行时**读取 PilotDeck 配置（默认 `~/.pilotdeck/pilotdeck
 
 成本节省的分母（cost_saving denominator）= `CPA/glm-5.3`。价格正本：`eval/pricing.json`。
 
+> **S4-M2 修订 A（`--tier-map switched`）**：因中继上游永久失去 `opencode-v4-flash` 且 5 小时限额耗尽部分凭据池，S4-M2 实验运行改用跨 provider 映射——simple=`provider1/deepseek-v4-flash-vision-exp`、medium=`CPA/tokendance-v4.1-flash`、complex=`CPA/OpenBMB-5.3`（不变）、reasoning=`provider1/glm-5.3`；评估器仍为 `CPA/gpt-5.6-sol`。switched 模型按同档价格类代理计价（已入 `pricing.json`），三臂同表，相对比较有效。默认 `--tier-map spec` 即上表冻结映射。
+
 ### 4.3 测试与运行
 
 ```bash
-# 0) 测试（无需任何服务与 key）——当前 264 passed
+# 0) 测试（无需任何服务与 key）——当前 330 passed
 python -m pytest harness jitrl_core local_judge eval -q
 
 # 1) routing-only（只跑决策循环，不执行生成；无 llama.cpp 时可改用 --judge mock）
@@ -180,6 +205,18 @@ python eval/analyze_results.py
 python eval/analyze_c1.py
 python eval/analyze_ablation.py --lm logs/s3_ablation_T8_LM.jsonl \
   --pm logs/s3_ablation_T8_PM.jsonl --out-dir eval/ablation
+
+# 8) S4-M2 多轮轨迹记忆更新三臂（T1 终局单标量 / T2 逐步+折扣信用 / T3 生命周期准入；
+#    任务行共享 traj_id 成轨迹，无 traj_id 行退化为单轮；判据见 docs/optimization/S4-M2-PREREGISTRATION.md）
+python -m harness.run_real --mode C --arm T1 --tasks eval/multiturn_tasks.jsonl \
+  --judge llama --episodes 2 --tier-map switched \
+  --out logs/s4m2_T1.jsonl --memory-out logs/s4m2_T1_mem.jsonl
+python -m harness.run_real --mode C --arm T2 --tasks eval/multiturn_tasks.jsonl \
+  --judge llama --episodes 2 --tier-map switched \
+  --out logs/s4m2_T2.jsonl --memory-out logs/s4m2_T2_mem.jsonl
+python -m harness.run_real --mode C --arm T3 --tasks eval/multiturn_tasks.jsonl \
+  --judge llama --episodes 2 --tier-map switched \
+  --out logs/s4m2_T3.jsonl --memory-out logs/s4m2_T3_mem.jsonl
 ```
 
 冻结超参（正式实验全程一致）：
@@ -189,6 +226,7 @@ k=10, β=5, λ=0.05, α=5, jaccard_threshold=0.5, z_min=−10, seed=42,
 min_neighbors=1（C0）/ 3（C1，预注册）,
 max_tokens_exec=1024, temperature_exec=0.7,
 Evaluator: temperature=0.2, max_tokens=300
+S4-M2 记忆更新臂: γ=0.8, η=0.5（折扣信用）; 生命周期准入 0.80/0.60
 ```
 
 ## 5. 实验
@@ -279,7 +317,7 @@ Evaluator: temperature=0.2, max_tokens=300
 
 ## 6. 诚实结论
 
-**实现了什么**：端到端证明了「冻结 Judge + 非参数记忆 + 闭式 logit 更新」的完整可行，JitRL 后处理开销近零（0.2–0.7ms），工程资产（harness、分析器、冻结数据、264 项测试）完全可复现。
+**实现了什么**：端到端证明了「冻结 Judge + 非参数记忆 + 闭式 logit 更新」的完整可行，JitRL 后处理开销近零（0.2–0.7ms），工程资产（harness、分析器、冻结数据、330 项测试）完全可复现。Session 4 进一步把记忆更新回路重写为**轨迹级**（轨迹复盘 → 逐步信用分配 → 生命周期准入，M1/M2 完成、既有行为逐位等价，见 `docs/optimization/`）。
 
 **没实现什么**：
 
@@ -398,5 +436,6 @@ python integrations/pilotdeck-jitrl/verify.py PilotDeck-src     # 校验 overlay
 
 - **分析器可从日志重算全部聚合与图表**（默认路径即上表正式日志；`analyze_results.py` 另含 audit-only 输入默认值）；
 - **冻结资产**：任务集、定价表、聚合 JSON/CSV/SVG、冻结记忆 trace（含 SHA-256 校验）全部随仓库分发；
-- **测试**：`python -m pytest harness jitrl_core local_judge eval -q` → **264 passed**（无需任何服务与 key；Demo 另有 `python -m pytest demo -q` → 32 passed）；
+- **S4-M2（进行中）**：三臂预注册（`docs/optimization/S4-M2-PREREGISTRATION.md` v1.1，含 switched 映射修订）已冻结；第一次真实运行因 provider 5h 限额中止（零成本），换映射冒烟通过后按预注册继续——结果文档 `S4-M2-RESULTS.md` 将在运行完成后落盘，不回写预注册；
+- **测试**：`python -m pytest harness jitrl_core local_judge eval -q` → **330 passed**（无需任何服务与 key；Demo 另有 `python -m pytest demo -q` → 32 passed）；
 - **预注册纪律**：C1 与 T8 的判据在运行前冻结，触发停止条件即停；后续方案须另立预注册，不覆盖、不回写。
