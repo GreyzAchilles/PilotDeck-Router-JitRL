@@ -1,6 +1,6 @@
 # JitRL Router — Session 4 优化进度
 
-> 状态：v1.3（2026-09-12）
+> 状态：v1.4（2026-09-12）
 > 范围：优先优化论文式记忆更新回路，固定顺序为 M1 兼容重构 → M1 验证 → M2 多轮轨迹。
 > 边界：本阶段仅修改独立 Python harness 与 `jitrl_core`，不修改 PilotDeck 实际 Router 和 Web Demo。
 > 正本：Pdwork `docs/optimization/`；仓库 `docs/optimization/` 为工作副本。
@@ -102,11 +102,35 @@
 - 冒烟资产：`logs/s4m2_smoke.jsonl` / `logs/s4m2_smoke_mem.jsonl`（保留作审计，不入正式数据）；
 - 恢复计划：14:27 限额重置后重跑冒烟，通过即顺序执行 T1/T2/T3 正式三臂（命令与判据以预注册 v1.0 为准，不回改）。
 
-## 下一步
+## 检查点 7：provider 切换、README 重写与 GitHub 发布（已完成）
 
-1. 14:27 限额重置后：重跑冒烟（M08 × T2）→ 通过 → 正式三臂（T1→T2→T3，episodes=2）→ `S4-M2-RESULTS.md`；
-2. 结果若支持 T2/T3：考虑把 per-step 语义字段引入检索侧（受控白名单，参照 T8-PM 教训）；
-3. 结果若不支持：回到 Judge 校准主线（Session 4 讨论的第一优先级遗留项）。
+### 7.1 基础设施探针与 switched 映射（预注册修订 A）
+
+- 项目所有者指示换 provider1 测试；探针发现：
+  - `opencode-v4-flash`（spec 中档）已从 CPA 中继上游**永久消失**（HTTP 400 unknown provider）——即使 14:27 限额重置，spec 映射也无法完整恢复；
+  - provider1 实际仅 2 个模型可用（deepseek-v4-flash-vision-exp、glm-5.3），其余 401 实例限制；
+  - CPA 的 `gpt-5.6-sol` 评估器与 `OpenBMB-5.3`、`tokendance-v4.1-flash` 存活。
+- 实现 `--tier-map switched`（simple=provider1/deepseek、medium=CPA/tokendance、reasoning=provider1/glm-5.3、complex 不变；评估器仍在 CPA）+ `ExecClientRouter` 按模型前缀跨 provider 路由 + 代理计价入 `eval/pricing.json`；预注册升 v1.1（修订 A）；
+- 测试 +10（`harness/tests/test_tier_map.py`）→ 核心 **330 passed**，既有零修改。
+
+### 7.2 第二次冒烟与运行阻塞（用户指示暂停）
+
+- 冒烟 2（M08 × T2 × switched）：基础设施全通——exec 3/3、eval 3/3、跨 provider 路由正常、记忆 3 条、成本约 $0.017；但 3 轮 `finish_reason=length` 且 content 为空；
+- 预算标定（真实任务消息、temperature 0.7）：四个执行模型全部先输出长 `reasoning_content`（推理真实存在，非故障），真实任务推理量远超 1024——deepseek 需 ≥8192 才出 content；`provider1/glm-5.3` 8192 仍不够；`tokendance` 6144 接近；OpenBMB 8192 网络超时。thinking 抑制参数探针未完成即被用户叫停；
+- **结论：当前执行预算（1024）与重推理模型的组合会系统性产生空回复**，继续跑会污染实验数据。恢复运行前需先解决：调大 `--max-tokens-exec`（成本上升，需重新评估预算）或找到各端点的 thinking 关闭参数；
+- 用户指示暂停实验运行，转向架构发布；14:30 自动恢复定时任务已取消。
+
+### 7.3 README 重写与 GitHub 发布
+
+- README 按新架构重写：头部引言改为「轨迹级非参数记忆 + 两个闭环（在线决策环 / 离线学习环）」双公式；§2 架构改为双闭环 ASCII 图 + 模块表（types/credit/updater/LifecycleMemory/TrajectoryLevelEvaluator/multiturn）+ 新增 3 条关键工程细节（盲评边界、冻结契约零破坏）；§3 仓库结构、§4.2 switched 映射注记、§4.3 三臂命令、§10 测试数 330——冻结实验数字（TL;DR/§5/§6）一字未动；
+- 与远程 TOC 修改（c21814c，项目所有者经 GitHub 网页更新）rebase 合并无冲突；
+- **commit `5054230` 已推送 GitHub**（21 文件，+3076/−153）：M1/M2 全部代码、`docs/optimization/` 三份正本、`eval/multiturn_tasks.jsonl`、switched 计价。
+
+## 下一步（S4-M2 恢复前置）
+
+1. 执行预算决策：调大 `--max-tokens-exec`（逐模型预算或统一 8192，需重估预注册 §5 预算上限）或继续探 thinking 抑制参数（`chat_template_kwargs` / `enable_thinking` / `reasoning_effort`）；
+2. 预算方案落预注册修订 B 后重跑冒烟 → 正式三臂 → `S4-M2-RESULTS.md`；
+3. 结果若支持 T2/T3：把 per-step 语义字段引入检索侧（受控白名单，参照 T8-PM 教训）；若不支持：回到 Judge 校准主线。
 
 ## 测试命令
 
@@ -122,3 +146,4 @@
 | 2026-09-12 | v1.1 | M1 完成并验证：types/credit/updater/LifecycleMemory/learn_trajectory 落地，run_real 接入统一轨迹接口（traj_id/n_steps 加法字段），修复注入空 memory 被替换隐患；测试 71/298/32 全绿（既有零修改），M2 接口预留就位 |
 | 2026-09-12 | v1.2 | M2 实现+预注册完成：multiturn 分组/会话构建、TrajectoryLevelEvaluator（盲评边界）、per_step 模式、T1/T2/T3 三臂、8 轨迹 28 轮任务集；测试 320/32 全绿（既有零修改）；`S4-M2-PREREGISTRATION.md` v1.0 冻结，待真实运行 |
 | 2026-09-12 | v1.3 | S4-M2 第一次运行尝试：Judge 探活通过；冒烟 3/3 exec 失败（CPA 429 五小时限额，14:27:21 重置），触发预注册 >20% 停止线中止；零成本；已安排限额重置后自动恢复（重跑冒烟 → 正式三臂） |
+| 2026-09-12 | v1.4 | 检查点 7：switched 跨 provider 映射 + ExecClientRouter + 代理计价（预注册 v1.1，测试 330）；冒烟 2 基础设施全通但发现重推理模型 1024 预算系统性空回复（deepseek 需 ≥8192），运行暂停待预算方案；README 重写为新架构并推送 GitHub（commit 5054230，21 文件 +3076/−153） |
