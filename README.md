@@ -24,7 +24,7 @@ z′(tier) = z(tier) + β · Â(tier)     # 对冻结 Judge 的 simple / medium 
 7. [6. 诚实结论](#6-诚实结论)
 8. [7. 已知限制](#7-已知限制)
 9. [8. Web Demo](#8-web-demo)
-10. [9. PilotDeck 集成（future work）](#9-pilotdeck-集成future-work)
+10. [9. PilotDeck 集成（MVP 已完成）](#9-pilotdeck-集成mvp-已完成)
 11. [10. 可复现性](#10-可复现性)
 
 ---
@@ -105,6 +105,7 @@ PilotDeck-Router-JitRL/
 │                   #   summary + CSV + 4 SVG）
 ├── diagrams/       # architecture.svg / arms.svg / online-offline.svg / pilotdeck-integration.svg
 ├── demo/           # Web Demo（离线优先）
+├── integrations/   # PilotDeck 集成 MVP 交付物：patch + overlay + verify.py（见 §9）
 ├── docs/           # 设计文档
 ├── logs/           # 实验日志（gitignore；正式命名见 §10）
 └── PilotDeck-src/  # 上游 PilotDeck 源码快照（决策路径复刻的对照基准）
@@ -318,17 +319,69 @@ python -m demo.server --online        # 启用在线决策面板（需本地 lla
 python -m pytest demo -q              # Demo 自身 32 项测试（无需任何服务与 key）
 ```
 
-## 9. PilotDeck 集成（future work）
+## 9. PilotDeck 集成（MVP 已完成）
 
 ![pilotdeck-integration](diagrams/pilotdeck-integration.svg)
 
-深度集成是 22h 预算之外的 future work；本仓库用独立 Python harness 忠实复刻 Router 决策路径替代（相同的 judge prompt 格式、四档体系、previousTier 续轮规则）。扩展点分析已完成：
+**状态更新**：第一阶段可运行 MVP 已完成并通过验证，不再停留在 future work。集成严格走上游官方扩展点 `PilotDeckCustomRouter` / `RouterContribution`，不改 Router 内核决策链路；交付物以 patch + overlay 双形式落盘于 [`integrations/pilotdeck-jitrl/`](integrations/pilotdeck-jitrl/)，基线为上游 PilotDeck `v2026.09.10`（commit `cfc4d17`），细节见 [`INTEGRATION.md`](integrations/pilotdeck-jitrl/INTEGRATION.md)。
 
-- **CustomRouter（上游已存在的扩展点）**：`decide()` 返回 provider/model 即可完全接管路由，JitRL engine 将承载于此——证明集成**不需要改动 Router 内核**；
-- **缺口① logprob 透传**：Judge 调用的 logprob 目前不暴露给路由层，需上游补通道（或如本仓库在 Judge 客户端内做 Method B 四请求）；
-- **缺口② episode outcome 回调**：episode 结束后的质量/成本需要回传路由层以喂给 `engine.learn()`——上游目前只存 previousTier 文本。
+### 9.1 旧版分析的兑现情况
 
-`jitrl_core` + `local_judge` 即为该集成准备的可移植核心；Demo 的在线/离线双模式路径另见 `diagrams/online-offline.svg`。
+| 旧版 §9 的分析 | MVP 落地情况 |
+|---|---|
+| CustomRouter 是上游已存在的扩展点，JitRL engine 可承载其上，无需改内核 | builtin `jitrl` 插件（`plugin.json` + `RouterContribution`）；配置 `router.customRouter.extensionId: jitrl` 即接管路由，零内核改动 |
+| 缺口① logprob 透传：Judge 的 logprob 不暴露给路由层 | canonical 协议暂无 logprobs → MVP 采用 4 次并行每档打分请求（0–10 分 → `logit((s+0.5)/11)`）作为 Method B 的保守等价；任一档失败/未配置则回退到确定性启发式 Judge（`mock_judge` 的 TS 移植），始终返回完整四档数值 |
+| 缺口② episode outcome 回调：质量/成本不回流路由层 | 新增可选 `PilotDeckCustomRouter.onTurnOutcome` 钩子；`RouterRuntime` 在 custom 路由的执行成功/最终失败路径回传 session/turn/用户消息/决策/usage/响应文本/错误 |
+
+### 9.2 实现要点
+
+- **TS 原生移植 `jitrl_core`**（`src/router/jitrl/`，10 个模块）：四档体系、intent 规则 + 规则归一化签名（CJK bigram）、top-k Jaccard 记忆、V/Q/Â 估计、闭式调制 `z′ = z + β·Â`、`minNeighbors` 门控、确定性 tie-break、`(state, tier, reward)` episode 写回。任务签名与 Python 参考实现逐 token 差分 **21/21 一致**；
+- **在线学习闭环**：成功轮由配置的 evaluator 模型直连 `ModelRuntime.complete` 评审（不经过 Router，无递归），reward = `0.6·quality + 0.3·costSaving`（costSaving 按候选集中最贵模型归一化并 clamp 到 [0,1]）；**evaluator 失败或执行失败不写记忆**；
+- **记忆持久化**：`<pilotHome>/router/jitrl-memory.json`，原子写（tmp + rename）+ 500ms 节流，容量 5000 drop-oldest；按 memory path 共享进程级状态——`lookupRouter()` 每次新建实例也不会丢学习状态；
+- **配置扩展**（`router.customRouter.*`）：`judge` / `evaluator` / `tiers`（档位 → 候选模型）/ `hyperparams`（k、β、λ、α、jaccardThreshold、zMin、memoryCap、seed、minNeighbors）/ `memoryPath` / `judgeTimeoutMs` / `evalTimeoutMs`；旧的仅 `{ extensionId }` 配置保持兼容；
+- **配套修复**：`PluginRuntime.refreshWithReport()` 磁盘重载 builtin 插件后不再丢失程序化 `RouterContribution`（否则插件刷新后自定义路由会静默失效）。
+
+配置示例（provider/model 须已存在于目标模型配置）：
+
+```yaml
+router:
+  enabled: true
+  customRouter:
+    extensionId: jitrl
+    judge: CPA/minicpm5-1b       # 四档打分模型；未配置则回退确定性启发式 Judge
+    evaluator: CPA/gpt-5.6-sol   # 质量评审模型；缺省回落 judge
+    tiers:                       # 档位 → 候选执行模型
+      simple: CPA/glm-5.3-flash
+      medium: CPA/opencode-v4-flash
+      complex: CPA/OpenBMB-5.3
+      reasoning: CPA/glm-5.3
+    hyperparams: { k: 10, beta: 5.0, lam: 0.05, alpha: 5.0, jaccardThreshold: 0.5,
+                   zMin: -10.0, memoryCap: 5000, seed: 42, minNeighbors: 3 }
+    judgeTimeoutMs: 15000
+    evalTimeoutMs: 15000
+```
+
+### 9.3 应用、校验与验证结果
+
+```bash
+git apply integrations/pilotdeck-jitrl/pilotdeck-jitrl.patch    # 在上游 v2026.09.10 检出上应用
+python integrations/pilotdeck-jitrl/verify.py PilotDeck-src     # 校验 overlay 与本地检出逐文件一致
+```
+
+- TypeScript 类型检查（`tsc -p tsconfig.json`）：通过；
+- JitRL node:test 套件：**59 passed / 0 failed**（覆盖核心算法等价、记忆持久化、配置解析、插件注册与刷新保留、outcome 学习 / evaluator 失败不学习 / 执行失败不学习）；
+- 根仓库 Python 侧 261 项测试不受影响（研究代码零改动）；
+- patch SHA-256：`139aa4fe4dfd9a06e3dab9b3045679cde5dcf0a00e39285e1ccbd974e3c5a720`。
+
+### 9.4 已知限制与后续工作
+
+1. TS 默认 RNG 为 seeded mulberry32（Python 为 MT19937），探索分支不逐位一致；测试注入 rng 保证数值等价；
+2. 每次判档 = 4 个并行打分请求（judge 延迟/成本高于单请求）；每个成功轮额外 1 次 evaluator 调用；
+3. 执行失败的轮不写记忆（无可靠质量信号）；
+4. 上游快照缺 `scripts/check-node-runtime.mjs`，标准 `npm test` 停在既有 prebuild；已直接运行等价的 build + test 主体；
+5. 上游 `.gitignore` 忽略 `*.test.ts`——集成测试随本仓库以 overlay/patch 形式分发，不受影响；
+6. **在线学习效果尚未做对照评估**：§5 的 A/B/C0/C1 结论均来自 Python harness；真实 PilotDeck 部署下的学习效果须按 §10 的预注册纪律单独设计实验；
+7. canonical 协议暴露 logprobs 后，可把打分式 Judge 换回真正的 Method B 单请求路径。
 
 ## 10. 可复现性
 
