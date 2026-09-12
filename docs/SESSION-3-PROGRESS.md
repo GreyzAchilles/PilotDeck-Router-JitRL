@@ -1,6 +1,6 @@
 # JitRL Router — Session 3 进度
 
-> 状态：v1.6（2026-09-11，含 provider 表述修正与集成 MVP 登记）
+> 状态：v1.7（2026-09-11，含 provider 表述修正与集成 MVP 登记）
 > 范围：Session 3 固定顺序 = 消融 → 技术设计图 → README → Web Demo → 演示视频 → 仓库终检/发布。
 > 边界：海报由外部 session 负责；`poster-a3/` 不读取不修改。文档正本在 Pdwork docs，修改必须升版并同步 INDEX。
 
@@ -109,8 +109,8 @@ Session 3 存在两条并行 orchestrator 线路先后落盘，产物有重叠�
 
 **修正范围（描述 + 最小代码增强）**：
 
-1. **README §4.2**：改为通用描述——运行时读取配置中 provider 条目的 `url` + `apiKey`，按 OpenAI 兼容协议调用；新增 `CPA/` 前缀说明块（含义 + 两种复现方式）；价格表标注"模型名为冻结实验记录中的原始 ID"；
-2. **README 其它 5 处**：开篇"真实 CPA 模型调用"→"真实执行模型调用（经 PilotDeck provider 配置）"；模块表 `cpa_client.py` 描述；§4.3 命令注释；§8 Demo 运行注释；§9 配置示例加注（前缀为示例 provider 名）；
+1. **README §4.2**：改为通用描述——运行时读取配置中 provider 条目的 `url` + `apiKey`，按 OpenAI 兼容协议调用（provider 名默认 `CPA`，可用 `JITRL_PROVIDER_ID` 覆盖）。**用户后续指示：不在 README 中过度解释 CPA**，故已删除初版的 `CPA/` 前缀说明块与"冻结原始 ID"注记，仅保留这一句通用描述；
+2. **README 其它 5 处**：开篇"真实 CPA 模型调用"→"真实执行模型调用（经 PilotDeck provider 配置）"；模块表 `cpa_client.py` 描述；§4.3 命令注释；§8 Demo 运行注释；§9 配置示例注记（已回退为原简版）；
 3. **demo/**：`README.md` 3 处（在线模式说明、隐私条款、故障排查项）、`server.py` 文档字符串 2 处、`index.html` 2 处可见文案（状态点 `CPA`→`provider`、执行开关改"真实模型调用"）、`app.js` 3 处横幅文案；
 4. **代码增强**：`harness/cpa_client.py` 新增 `JITRL_PROVIDER_ID` 环境变量覆盖 provider 名（默认 `CPA`，完全向后兼容）；文档字符串澄清 CPA 是本机中转站；传输错误信息改用实际 provider 名；`load_cpa_provider` 增加 `provider_id` 参数；
 5. **测试**：新增 3 项（env 覆盖、默认值、模型前缀与 provider 名无关）→ 核心 **264 passed** + demo 32 = **296 passed**；
@@ -154,3 +154,4 @@ Session 3 六项检查点 + provider 表述修正均已完成；集成 MVP 已�
 | 2026-09-11 | v1.4 | 演示视频完成：`S3-DEMO-VIDEO-SCRIPT.md` v1.0 + `demo/demo-video.mp4`（2:00.00，4 段真实 Demo 截图 + 2 图实拍 + 5 叙事卡，断网可录产线 `demo/make_video.py`）；`#live` 深链与 `demo/smoke_check.py` 辅助入库；进入仓库终检/发布 |
 | 2026-09-11 | v1.5 | 仓库终检与发布完成：清理/正本入库12份/MIT LICENSE/secret扫描零命中/293 tests/commit d419ab7 104文件推送成功/彩排清单落盘；Session 3 六项检查点全部完成 |
 | 2026-09-11 | v1.6 | 检查点 7（provider 表述修正，用户反馈驱动）：README §4.2 及全仓 15+ 处"CPA provider"类误导表述改为通用 provider 描述 + `CPA/` 前缀说明；`harness/cpa_client.py` 新增 `JITRL_PROVIDER_ID` 覆盖（默认 CPA，向后兼容）；新增 3 测试 → 核心 264 + demo 32 = 296 passed；冻结模型 ID 不改写。检查点 8：登记外部线路的 PilotDeck 集成 MVP（ce470e3/7b10fd6，integrations/ 交付物 + 59 node tests） |
+| 2026-09-11 | v1.7 | 按用户后续指示精简 README：删除 `CPA/` 前缀解释块与冻结 ID 注记（避免对 CPA 过度解释），§4.2 仅保留一句通用描述（provider 条目 url+apiKey、`JITRL_PROVIDER_ID` 可覆盖）；§9 示例注记回退简版；demo/README 排查项同步精简；代码增强与测试不变 |

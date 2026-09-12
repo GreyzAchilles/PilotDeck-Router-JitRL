@@ -80,7 +80,7 @@ T8 消融 caveat、续轮 0/5、延迟归因、截断统计、故障重试审计
 | 症状 | 排查 |
 |---|---|
 | 在线模式横幅「Judge 不可达」 | 先启动 llama-server：`llama-server -m minicpm5-1b … --port 18080`；端点可用 `JITRL_JUDGE_ENDPOINT` 覆盖（默认 `http://127.0.0.1:18080`），模型用 `JITRL_JUDGE_MODEL`，超时 `JITRL_JUDGE_TIMEOUT_S` |
-| 横幅「provider 配置缺失」 | PilotDeck 配置解析顺序：`PILOTDECK_CONFIG_PATH` → `PILOT_HOME/pilotdeck.yaml` → `~/.pilotdeck/pilotdeck.yaml`；需含 `model.providers.CPA`（protocol=openai、url、apiKey）——provider 名可用 `JITRL_PROVIDER_ID` 改成你自己的（默认 `CPA`，实验时是作者设备上的本地中转 provider）。Demo 不读取也不展示其内容 |
+| 横幅「provider 配置缺失」 | PilotDeck 配置解析顺序：`PILOTDECK_CONFIG_PATH` → `PILOT_HOME/pilotdeck.yaml` → `~/.pilotdeck/pilotdeck.yaml`；需含 `model.providers.CPA`（protocol=openai、url、apiKey），provider 名可用 `JITRL_PROVIDER_ID` 覆盖（默认 `CPA`）。Demo 不读取也不展示其内容 |
 | 决策返回 `budget_exceeded` | 会话执行花费已达上限：点「重置会话」或调大 `--max-session-usd` 重启 |
 | 想断网演示 | 直接默认离线模式启动即可——实验面板完全本地，`/api/decide` 返回 503 JSON 并显示黄色横幅 |
 | 端口占用 | `--port` 换端口 |

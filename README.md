@@ -125,13 +125,9 @@ llama.cpp `llama-server` 部署 **MiniCPM5-1B Q4_K_M GGUF（约 683MB）**：
 
 ### 4.2 执行/评估模型（真实实验必需）
 
-harness 在**运行时**读取 PilotDeck 配置（默认 `~/.pilotdeck/pilotdeck.yaml`，可用 `--config` 或 `PILOTDECK_CONFIG_PATH` 覆盖）中 provider 条目的 `url` 与 `apiKey`，按 **OpenAI 兼容协议**（`POST {url}/chat/completions`）调用。**API key 只在运行时读取，仓库从不存储任何密钥。**
+harness 在**运行时**读取 PilotDeck 配置（默认 `~/.pilotdeck/pilotdeck.yaml`，可用 `--config` 或 `PILOTDECK_CONFIG_PATH` 覆盖）中 provider 条目的 `url` 与 `apiKey`，按 **OpenAI 兼容协议**（`POST {url}/chat/completions`）调用；provider 名默认 `CPA`，可用 `JITRL_PROVIDER_ID` 覆盖。**API key 只在运行时读取，仓库从不存储任何密钥。**
 
-> **关于模型 ID 的 `CPA/` 前缀**：模型 ID 写作 `PROVIDER/model`，前缀就是 PilotDeck 配置里的 provider 名。本仓库冻结实验使用的 provider 名为 `CPA`——它是作者设备上一个暴露本地端口的中转站（OpenAI 兼容代理），**不是云端厂商，也不是必需的 provider 名**。复现方式二选一：
-> 1. 在自己的 `pilotdeck.yaml` 里配置一个名为 `CPA` 的 `protocol: openai` provider（指向你的 OpenAI 兼容端点），即可原样运行；
-> 2. 用环境变量 `JITRL_PROVIDER_ID=你的provider名` 指定现有 provider，并同步调整 `harness/pricing.py` 的 tier→model 映射与 `eval/pricing.json` 中的模型名/价格。
-
-下表模型名为**冻结实验记录中的原始 ID**（含 provider 前缀），价格单位为 $/Mtok（input / output）：
+价格单位为 $/Mtok（input / output）：
 
 | 角色 | 模型 | $/Mtok（input / output） |
 |---|---|---:|
@@ -347,7 +343,7 @@ python -m pytest demo -q              # Demo 自身 32 项测试（无需任何�
 - **配置扩展**（`router.customRouter.*`）：`judge` / `evaluator` / `tiers`（档位 → 候选模型）/ `hyperparams`（k、β、λ、α、jaccardThreshold、zMin、memoryCap、seed、minNeighbors）/ `memoryPath` / `judgeTimeoutMs` / `evalTimeoutMs`；旧的仅 `{ extensionId }` 配置保持兼容；
 - **配套修复**：`PluginRuntime.refreshWithReport()` 磁盘重载 builtin 插件后不再丢失程序化 `RouterContribution`（否则插件刷新后自定义路由会静默失效）。
 
-配置示例（provider/model 须已存在于目标模型配置；下例的 `CPA/` 前缀即作者配置中的本地中转 provider 名，换成你自己的 provider/model 即可）：
+配置示例（provider/model 须已存在于目标模型配置）：
 
 ```yaml
 router:
