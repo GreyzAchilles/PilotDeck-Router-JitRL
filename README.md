@@ -7,7 +7,7 @@
 z′(tier) = z(tier) + β · Â(tier)     # 对冻结 Judge 的 simple / medium / complex / reasoning 四档 logit 做闭式更新
 ```
 
-本仓库是一个**纯标准库（stdlib-only）的独立 Python harness**：不依赖 PilotDeck 启动链路，但**逐项忠实复刻 Router 的决策路径**（相同的 judge prompt 格式、四档体系、previousTier 续轮规则），在真实 CPA 模型调用与盲评 Evaluator 下完成了 A/B/C0/C1 预注册对照实验与 T8 机制消融。目标：保住回答质量的同时降低模型调用成本。
+本仓库是一个**纯标准库（stdlib-only）的独立 Python harness**：不依赖 PilotDeck 启动链路，但**逐项忠实复刻 Router 的决策路径**（相同的 judge prompt 格式、四档体系、previousTier 续轮规则），在真实执行模型调用（经 PilotDeck provider 配置）与盲评 Evaluator 下完成了 A/B/C0/C1 预注册对照实验与 T8 机制消融。目标：保住回答质量的同时降低模型调用成本。
 
 **诚实结论先行**：端到端管线完全可行，JitRL 后处理开销近零（mean 0.2444ms / max 0.6664ms）；但默认 C0 **未达到 ≥20% 的成本目标**（D10 判定 3/4），C1 保守门控也**未通过预注册判据**（3/5，且出现记忆级联），T8 消融显示当前 1B Judge 几乎不利用注入的记忆（0/6 影响）。本项目把「带机理分析的诚实负结果」当作一等公民，全部数字为冻结口径，见[实验](#5-实验)与[诚实结论](#6-诚实结论)。
 
@@ -79,7 +79,7 @@ JitRL 恰好补上这一块。映射关系：
 |---|---|
 | `jitrl_core/` | engine（retrieve → estimate → gate/modulate → choose → learn）、memory（top-k Jaccard 检索）、state（intent_class + 规则归一化签名 + CJK bigram）、value（V/Q/Â，含 λ 探索）、policy（clamp / modulate / argmax）、config（冻结超参） |
 | `local_judge/` | 面向 llama.cpp 的生产 JudgeClient：**Method B 硬化 logit 提取**（四档各一次 grammar-forced 请求、共 4 次；canonical tokenization 校验 + 重试阶梯 + `Z_MIN=−10` clamp）、GBNF grammar、逐字节复刻 PilotDeck `generateJudgePrompt` |
-| `harness/` | `run.py`（routing-only A/B/C）、`run_real.py`（真实 episode A/B/C/C1：CPA 执行 + Evaluator + reward + 记忆写回）、`run_ablation.py`（T8-LM vs T8-PM）、`cpa_client.py`（运行时读取 PilotDeck CPA provider 配置）、`evaluator.py`（盲评结构化评估）、`real_rewards.py`、`pricing.py` |
+| `harness/` | `run.py`（routing-only A/B/C）、`run_real.py`（真实 episode A/B/C/C1：provider 执行 + Evaluator + reward + 记忆写回）、`run_ablation.py`（T8-LM vs T8-PM）、`cpa_client.py`（运行时读取 PilotDeck 配置中的 OpenAI 兼容 provider 凭据）、`evaluator.py`（盲评结构化评估）、`real_rewards.py`、`pricing.py` |
 | `eval/` | 任务集 `tasks.jsonl`、`tasks-meta.md`、`pricing.json`、分析器（`analyze_results.py` / `analyze_c1.py` / `analyze_ablation.py` / `run_continuation_probes.py`）与冻结聚合资产（见 §10） |
 | `diagrams/` | 4 张技术 SVG：`architecture.svg`、`arms.svg`（本节）、`online-offline.svg`、`pilotdeck-integration.svg` |
 | `demo/` | Web Demo（离线优先，见 [§8](#8-web-demo)） |
@@ -125,7 +125,13 @@ llama.cpp `llama-server` 部署 **MiniCPM5-1B Q4_K_M GGUF（约 683MB）**：
 
 ### 4.2 执行/评估模型（真实实验必需）
 
-harness 在**运行时**读取 PilotDeck 配置（默认 `~/.pilotdeck/pilotdeck.yaml`，可用 `--config` 或 `PILOTDECK_CONFIG_PATH` 覆盖）中的 CPA provider 凭据。**API key 只在运行时读取，仓库从不存储任何密钥。**
+harness 在**运行时**读取 PilotDeck 配置（默认 `~/.pilotdeck/pilotdeck.yaml`，可用 `--config` 或 `PILOTDECK_CONFIG_PATH` 覆盖）中 provider 条目的 `url` 与 `apiKey`，按 **OpenAI 兼容协议**（`POST {url}/chat/completions`）调用。**API key 只在运行时读取，仓库从不存储任何密钥。**
+
+> **关于模型 ID 的 `CPA/` 前缀**：模型 ID 写作 `PROVIDER/model`，前缀就是 PilotDeck 配置里的 provider 名。本仓库冻结实验使用的 provider 名为 `CPA`——它是作者设备上一个暴露本地端口的中转站（OpenAI 兼容代理），**不是云端厂商，也不是必需的 provider 名**。复现方式二选一：
+> 1. 在自己的 `pilotdeck.yaml` 里配置一个名为 `CPA` 的 `protocol: openai` provider（指向你的 OpenAI 兼容端点），即可原样运行；
+> 2. 用环境变量 `JITRL_PROVIDER_ID=你的provider名` 指定现有 provider，并同步调整 `harness/pricing.py` 的 tier→model 映射与 `eval/pricing.json` 中的模型名/价格。
+
+下表模型名为**冻结实验记录中的原始 ID**（含 provider 前缀），价格单位为 $/Mtok（input / output）：
 
 | 角色 | 模型 | $/Mtok（input / output） |
 |---|---|---:|
@@ -140,7 +146,7 @@ harness 在**运行时**读取 PilotDeck 配置（默认 `~/.pilotdeck/pilotdeck
 ### 4.3 测试与运行
 
 ```bash
-# 0) 测试（无需任何服务与 key）——当前 261 passed
+# 0) 测试（无需任何服务与 key）——当前 264 passed
 python -m pytest harness jitrl_core local_judge eval -q
 
 # 1) routing-only（只跑决策循环，不执行生成；无 llama.cpp 时可改用 --judge mock）
@@ -152,7 +158,7 @@ python -m harness.run --mode C --tasks eval/tasks.jsonl --judge llama \
 # 2) 签名可分性检查
 python -m harness.separability --tasks eval/tasks.jsonl
 
-# 3) 真实 episode A/B/C0（需要 llama.cpp Judge + PilotDeck CPA 配置）
+# 3) 真实 episode A/B/C0（需要 llama.cpp Judge + PilotDeck 配置中的 provider 凭据）
 python -m harness.run_real --mode A --tasks eval/tasks.jsonl --judge llama \
   --out logs/s2_full_A_main24.jsonl
 python -m harness.run_real --mode B --tasks eval/tasks.jsonl --judge llama \
@@ -277,7 +283,7 @@ Evaluator: temperature=0.2, max_tokens=300
 
 ## 6. 诚实结论
 
-**实现了什么**：端到端证明了「冻结 Judge + 非参数记忆 + 闭式 logit 更新」的完整可行，JitRL 后处理开销近零（0.2–0.7ms），工程资产（harness、分析器、冻结数据、261 项测试）完全可复现。
+**实现了什么**：端到端证明了「冻结 Judge + 非参数记忆 + 闭式 logit 更新」的完整可行，JitRL 后处理开销近零（0.2–0.7ms），工程资产（harness、分析器、冻结数据、264 项测试）完全可复现。
 
 **没实现什么**：
 
@@ -315,7 +321,7 @@ Evaluator: temperature=0.2, max_tokens=300
 
 ```bash
 python -m demo.server                 # 离线模式（默认）→ http://127.0.0.1:8300
-python -m demo.server --online        # 启用在线决策面板（需本地 llama.cpp Judge + PilotDeck CPA 配置）
+python -m demo.server --online        # 启用在线决策面板（需本地 llama.cpp Judge + PilotDeck 配置中的 provider 凭据）
 python -m pytest demo -q              # Demo 自身 32 项测试（无需任何服务与 key）
 ```
 
@@ -341,7 +347,7 @@ python -m pytest demo -q              # Demo 自身 32 项测试（无需任何�
 - **配置扩展**（`router.customRouter.*`）：`judge` / `evaluator` / `tiers`（档位 → 候选模型）/ `hyperparams`（k、β、λ、α、jaccardThreshold、zMin、memoryCap、seed、minNeighbors）/ `memoryPath` / `judgeTimeoutMs` / `evalTimeoutMs`；旧的仅 `{ extensionId }` 配置保持兼容；
 - **配套修复**：`PluginRuntime.refreshWithReport()` 磁盘重载 builtin 插件后不再丢失程序化 `RouterContribution`（否则插件刷新后自定义路由会静默失效）。
 
-配置示例（provider/model 须已存在于目标模型配置）：
+配置示例（provider/model 须已存在于目标模型配置；下例的 `CPA/` 前缀即作者配置中的本地中转 provider 名，换成你自己的 provider/model 即可）：
 
 ```yaml
 router:
@@ -370,7 +376,7 @@ python integrations/pilotdeck-jitrl/verify.py PilotDeck-src     # 校验 overlay
 
 - TypeScript 类型检查（`tsc -p tsconfig.json`）：通过；
 - JitRL node:test 套件：**59 passed / 0 failed**（覆盖核心算法等价、记忆持久化、配置解析、插件注册与刷新保留、outcome 学习 / evaluator 失败不学习 / 执行失败不学习）；
-- 根仓库 Python 侧 261 项测试不受影响（研究代码零改动）；
+- 根仓库 Python 侧 264 项测试不受影响（研究代码零改动）；
 - patch SHA-256：`139aa4fe4dfd9a06e3dab9b3045679cde5dcf0a00e39285e1ccbd974e3c5a720`。
 
 ### 9.4 已知限制与后续工作
@@ -396,5 +402,5 @@ python integrations/pilotdeck-jitrl/verify.py PilotDeck-src     # 校验 overlay
 
 - **分析器可从日志重算全部聚合与图表**（默认路径即上表正式日志；`analyze_results.py` 另含 audit-only 输入默认值）；
 - **冻结资产**：任务集、定价表、聚合 JSON/CSV/SVG、冻结记忆 trace（含 SHA-256 校验）全部随仓库分发；
-- **测试**：`python -m pytest harness jitrl_core local_judge eval -q` → **261 passed**（无需任何服务与 key）；
+- **测试**：`python -m pytest harness jitrl_core local_judge eval -q` → **264 passed**（无需任何服务与 key；Demo 另有 `python -m pytest demo -q` → 32 passed）；
 - **预注册纪律**：C1 与 T8 的判据在运行前冻结，触发停止条件即停；后续方案须另立预注册，不覆盖、不回写。

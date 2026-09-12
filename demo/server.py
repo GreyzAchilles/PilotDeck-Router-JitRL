@@ -7,7 +7,7 @@ Contract (frozen by README.md + progress doc):
       DEFAULT = offline mode (zero network): only the frozen-aggregate
       experiment panels work; /api/decide returns a structured 503 JSON.
       --online enables the live decision API (local llama.cpp judge +
-      PilotDeck CPA execution/evaluation, proxied by this backend).
+      PilotDeck provider execution/evaluation, proxied by this backend).
 
 Routes:
     GET  /                      -> demo/static/index.html
@@ -29,8 +29,10 @@ Privacy:
       process's RAM only; /api/reset clears it; nothing is persisted.
     - Visitor free-input text is NEVER written to disk or logged (the access
       log records method + path + status only, never bodies).
-    - The PilotDeck CPA apiKey is read by the backend only (via
-      harness.cpa_client) and NEVER sent to the browser.
+    - The PilotDeck provider apiKey is read by the backend only (via
+      harness.cpa_client) and NEVER sent to the browser. The provider id
+      defaults to "CPA" (the experiment author's local-relay provider name)
+      and follows the JITRL_PROVIDER_ID env var.
 
 Budget guard:
     - Cumulative live EXECUTION spend per session is capped

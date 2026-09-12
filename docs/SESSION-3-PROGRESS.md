@@ -1,6 +1,6 @@
 # JitRL Router — Session 3 进度
 
-> 状态：v1.4（2026-09-11）
+> 状态：v1.6（2026-09-11，含 provider 表述修正与集成 MVP 登记）
 > 范围：Session 3 固定顺序 = 消融 → 技术设计图 → README → Web Demo → 演示视频 → 仓库终检/发布。
 > 边界：海报由外部 session 负责；`poster-a3/` 不读取不修改。文档正本在 Pdwork docs，修改必须升版并同步 INDEX。
 
@@ -86,9 +86,52 @@ Session 3 存在两条并行 orchestrator 线路先后落盘，产物有重叠�
 - 辅助改动：`demo/static/app.js` 增加 `#live` hash 深链（无头截取与分享链接两用）；`demo/smoke_check.py` 进程内 11 项冒烟；
 - 配音可后补：字幕已覆盖全部信息；任何分镜可替换为实时操作录屏（离线段断网可录）。
 
+## 检查点 6：仓库终检与发布（已完成）
+
+- **清理**：`docs/diagrams/` 重复集已删除（按协调裁决）；`nul` 误产物已删除；`__pycache__/`、`.pytest_cache/`、`demo/.video/`、`logs/`、`agent-tasks/`、`reports/`、`poster-a3/`（不修改内容、仅排除出库）全部 gitignore；
+- **文档正本入库**：`docs/` 复制 12 份正本（technical/project-decisions、Price、results、S2-C1 与 S3-TAB8 的 prereg+results、视频脚本、三个 SESSION 进度/总结）；内部交接文档与海报 copy-sheet 不入库；
+- **LICENSE**：MIT（GreyzAchilles, 2026）；
+- **secret 扫描**：模式扫描（sk-/api_key=/Bearer）零命中；`pilotdeck.yaml` 相关仅存在路径/配置说明引用；
+- **测试**：`python -m pytest harness jitrl_core local_judge eval demo -q` → **293 passed**（261 核心 + 32 demo）；
+- **首次提交并推送**：commit `d419ab7`，104 文件，分支 `main` → `https://github.com/GreyzAchilles/PilotDeck-Router-JitRL` 推送成功（首次超时为凭据交互，非交互重试通过）；
+- **彩排与离线降级验证**：`python demo/smoke_check.py` 11/11 ALL PASS（离线面板/图表/路径穿越防护/503 结构化降级）；视频产线全程离线模式录制成功，断网演示可行。
+
+### 现场彩排清单（游园会）
+
+1. `python -m demo.server`（默认离线，:8300）→ 打开 http://127.0.0.1:8300，走一遍数据面板（TL;DR → 判据 → flips/级联/T8 → 0/5 → 延迟归因）；
+2. 切到「实时决策」tab 展示离线降级横幅（断网态预期行为）；
+3. 有网络 + llama.cpp 时：`python -m demo.server --online`，选 C0 跑 1–2 条预设任务展示完整 trace，再演示 PM 臂与 reset；
+4. 备播：`demo/demo-video.mp4`（2:00，全程可静音播放）。
+
+## 检查点 7：provider 表述修正（已完成，用户反馈驱动）
+
+**问题**：README §4.2（快速开始·执行/评估模型）把 `--config` 中的 provider 凭据写成"CPA provider 凭据"，暗示 CPA 是必需/外部的 provider 类型。事实：`CPA` 只是作者设备上一个暴露本地端口的中转站（OpenAI 兼容代理）在 `pilotdeck.yaml` 里的 provider 条目名，**不是云端厂商，也不是必需的 provider 名**；模型 ID `PROVIDER/model` 的前缀只是该 provider 名。
+
+**修正范围（描述 + 最小代码增强）**：
+
+1. **README §4.2**：改为通用描述——运行时读取配置中 provider 条目的 `url` + `apiKey`，按 OpenAI 兼容协议调用；新增 `CPA/` 前缀说明块（含义 + 两种复现方式）；价格表标注"模型名为冻结实验记录中的原始 ID"；
+2. **README 其它 5 处**：开篇"真实 CPA 模型调用"→"真实执行模型调用（经 PilotDeck provider 配置）"；模块表 `cpa_client.py` 描述；§4.3 命令注释；§8 Demo 运行注释；§9 配置示例加注（前缀为示例 provider 名）；
+3. **demo/**：`README.md` 3 处（在线模式说明、隐私条款、故障排查项）、`server.py` 文档字符串 2 处、`index.html` 2 处可见文案（状态点 `CPA`→`provider`、执行开关改"真实模型调用"）、`app.js` 3 处横幅文案；
+4. **代码增强**：`harness/cpa_client.py` 新增 `JITRL_PROVIDER_ID` 环境变量覆盖 provider 名（默认 `CPA`，完全向后兼容）；文档字符串澄清 CPA 是本机中转站；传输错误信息改用实际 provider 名；`load_cpa_provider` 增加 `provider_id` 参数；
+5. **测试**：新增 3 项（env 覆盖、默认值、模型前缀与 provider 名无关）→ 核心 **264 passed** + demo 32 = **296 passed**；
+6. **不改写冻结事实**：所有 A/B/C0/C1/T8 表格、聚合 JSON、日志与文档中的 `CPA/xxx` 模型 ID 均为实验原始记录，保持原样。
+
+## 检查点 8（外部推进）：PilotDeck 集成 MVP（由用户/另一线路完成，已并入仓库）
+
+仓库新增提交 `ce470e3`（feat: add PilotDeck JitRL integration）与 `7b10fd6`（README §9 更新）：
+
+- 交付物 `integrations/pilotdeck-jitrl/`（patch + overlay + verify.py + INTEGRATION.md），基线上游 `v2026.09.10`（commit `cfc4d17`）；
+- 走上游官方扩展点 `PilotDeckCustomRouter` / `RouterContribution`，`router.customRouter.extensionId: jitrl` 即接管路由，零内核改动；
+- TS 原生移植 `jitrl_core`（10 模块），签名与 Python 参考实现逐 token 差分 21/21 一致；新增可选 `onTurnOutcome` 钩子回传 usage/响应/错误；
+- 记忆持久化 `<pilotHome>/router/jitrl-memory.json`（原子写 + 节流 + 容量 5000）；
+- 验证：tsc 通过、node:test 59 passed、根仓库 Python 侧不受影响；
+- 已知限制：TS RNG 为 seeded mulberry32（与 Python MT19937 探索分支不逐位一致）；在线学习效果尚未做对照评估（须按预注册纪律另立实验）。
+
+> 注：本检查点由外部线路落地，本次读取核对后登记；JitRL 决策/数学与 Python harness 冻结实验结论不变。
+
 ## 下一步
 
-第 6 项仓库终检/发布：docs/diagrams/ 清理 → 文档正本入库 → LICENSE → secret 扫描 → 全量测试 → README 自检 → 首次 commit & push → 彩排清单。
+Session 3 六项检查点 + provider 表述修正均已完成；集成 MVP 已由外部线路并入。项目出口达成：公开仓库 + Demo + 视频 + README + 技术图 + 消融 + 集成 MVP（海报由外部 session 负责）。
 
 ---
 
@@ -109,3 +152,5 @@ Session 3 存在两条并行 orchestrator 线路先后落盘，产物有重叠�
 | 2026-09-11 | v1.2 | README 完成并锁定 Demo 契约（demo.server :8300 offline 默认）；数字自检通过；进入 Web Demo 阶段 |
 | 2026-09-11 | v1.3 | Web Demo 完成（demo/ 全量，:8300 契约、离线面板/在线五臂/隐私降级，32+261 tests、11/11 冒烟）；记录并行工作流协调裁决（根 diagrams/ 为正、docs/diagrams/ 待终检清理、README 验证版回收 :8300/MIT 要素）；进入演示视频阶段 |
 | 2026-09-11 | v1.4 | 演示视频完成：`S3-DEMO-VIDEO-SCRIPT.md` v1.0 + `demo/demo-video.mp4`（2:00.00，4 段真实 Demo 截图 + 2 图实拍 + 5 叙事卡，断网可录产线 `demo/make_video.py`）；`#live` 深链与 `demo/smoke_check.py` 辅助入库；进入仓库终检/发布 |
+| 2026-09-11 | v1.5 | 仓库终检与发布完成：清理/正本入库12份/MIT LICENSE/secret扫描零命中/293 tests/commit d419ab7 104文件推送成功/彩排清单落盘；Session 3 六项检查点全部完成 |
+| 2026-09-11 | v1.6 | 检查点 7（provider 表述修正，用户反馈驱动）：README §4.2 及全仓 15+ 处"CPA provider"类误导表述改为通用 provider 描述 + `CPA/` 前缀说明；`harness/cpa_client.py` 新增 `JITRL_PROVIDER_ID` 覆盖（默认 CPA，向后兼容）；新增 3 测试 → 核心 264 + demo 32 = 296 passed；冻结模型 ID 不改写。检查点 8：登记外部线路的 PilotDeck 集成 MVP（ce470e3/7b10fd6，integrations/ 交付物 + 59 node tests） |

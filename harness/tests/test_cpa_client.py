@@ -13,8 +13,10 @@ from harness.cpa_client import (
     HTTPFailure,
     NetworkFailure,
     ProviderConfig,
+    _api_model_name,
     load_cpa_provider,
     normalize_openai_usage,
+    provider_id_from_env,
     resolve_api_key,
     resolve_config_path,
     urllib_transport,
@@ -117,6 +119,32 @@ class TestConfigResolution(unittest.TestCase):
             p = write_yaml(tmp, "model:\n  providers:\n    other: {}\n")
             with self.assertRaises(CPAConfigError):
                 load_cpa_provider(config_path=p)
+
+    def test_provider_id_env_override(self):
+        """JITRL_PROVIDER_ID selects any provider; default stays "CPA"."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = write_yaml(tmp, VALID_YAML.replace("    CPA:", "    myrelay:"))
+            env = {"PILOTDECK_CONFIG_PATH": str(p),
+                   "JITRL_PROVIDER_ID": "myrelay"}
+            prov = load_cpa_provider(env=env)
+            self.assertEqual(prov.provider_id, "myrelay")
+            self.assertEqual(prov.api_key, SECRET)
+            # explicit argument wins over the env var
+            prov2 = load_cpa_provider(env=env, provider_id="myrelay")
+            self.assertEqual(prov2.provider_id, "myrelay")
+            # without the override the default "CPA" lookup fails here
+            with self.assertRaises(CPAConfigError):
+                load_cpa_provider(env={"PILOTDECK_CONFIG_PATH": str(p)})
+
+    def test_default_provider_id_is_cpa(self):
+        self.assertEqual(provider_id_from_env({}), "CPA")
+        self.assertEqual(provider_id_from_env({"JITRL_PROVIDER_ID": "  "}), "CPA")
+        self.assertEqual(provider_id_from_env({"JITRL_PROVIDER_ID": "x"}), "x")
+
+    def test_model_prefix_is_provider_agnostic(self):
+        self.assertEqual(_api_model_name("CPA/glm-5.3"), "glm-5.3")
+        self.assertEqual(_api_model_name("myrelay/glm-5.3"), "glm-5.3")
+        self.assertEqual(_api_model_name("glm-5.3"), "glm-5.3")
 
     def test_wrong_protocol_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

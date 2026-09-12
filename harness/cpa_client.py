@@ -1,9 +1,17 @@
-"""CPA execution client (Session 2 / Workstream A).
+"""Provider execution client (Session 2 / Workstream A).
 
-Calls the CPA model provider declared in the PilotDeck config
-(`model.providers.CPA`, protocol=openai) via its OpenAI-compatible
+Calls an OpenAI-protocol model provider declared in the PilotDeck config
+(`model.providers.<id>`, protocol=openai) via its OpenAI-compatible
 `POST {url}/chat/completions` endpoint (non-streaming), and returns the
 generated content plus normalized token usage.
+
+Provider selection: the provider id defaults to "CPA" and can be overridden
+with the JITRL_PROVIDER_ID environment variable. NOTE: "CPA" is NOT a cloud
+vendor — it is simply the provider entry name in the experiment author's
+pilotdeck.yaml, pointing at a local relay (a port exposed on the author's
+machine that proxies OpenAI-compatible upstreams). Model ids are written
+"PROVIDER/model" (e.g. "CPA/glm-5.3"); the prefix is stripped before the
+request, so any configured provider name works.
 
 Config resolution order (mirrors PilotDeck-src/src/pilot/config/loadPilotConfig.ts
 + src/pilot/paths.ts):
@@ -53,9 +61,15 @@ from typing import Any, Callable, TypedDict
 CONFIG_FILE_NAME = "pilotdeck.yaml"
 ENV_CONFIG_PATH = "PILOTDECK_CONFIG_PATH"
 ENV_PILOT_HOME = "PILOT_HOME"
+ENV_PROVIDER_ID = "JITRL_PROVIDER_ID"
 DEFAULT_PILOT_HOME = "~/.pilotdeck"
 
-PROVIDER_ID = "CPA"
+#: Default provider id. "CPA" is the provider entry name in the experiment
+#: author's pilotdeck.yaml — a local relay exposing an OpenAI-compatible
+#: port on the author's machine, NOT a cloud vendor. Override with the
+#: JITRL_PROVIDER_ID env var to use any provider configured in your own
+#: PilotDeck config.
+DEFAULT_PROVIDER_ID = "CPA"
 SUPPORTED_PROTOCOLS = ("openai",)
 
 MAX_ATTEMPTS = 4                 # retryable errors: 1 initial + 3 retries
@@ -191,11 +205,19 @@ class ProviderConfig:
                 f"api_key=<redacted>, models={sorted(self.models)!r})")
 
 
-def resolve_api_key(value: Any, env: dict[str, str] | None = None) -> str:
+def provider_id_from_env(env: dict[str, str] | None = None) -> str:
+    """JITRL_PROVIDER_ID override -> default "CPA" (see DEFAULT_PROVIDER_ID)."""
+    env_map = os.environ if env is None else env
+    explicit = (env_map.get(ENV_PROVIDER_ID) or "").strip()
+    return explicit or DEFAULT_PROVIDER_ID
+
+
+def resolve_api_key(value: Any, env: dict[str, str] | None = None,
+                    provider_id: str = DEFAULT_PROVIDER_ID) -> str:
     """Resolve a provider apiKey (trimmed; ${ENV_VAR} supported). Never leaks it."""
     if not isinstance(value, str) or not value.strip():
         raise CPAConfigError(
-            f"provider {PROVIDER_ID}: apiKey must be a non-empty string")
+            f"provider {provider_id}: apiKey must be a non-empty string")
     env_map = os.environ if env is None else env
     trimmed = value.strip()
     m = _ENV_REF_RE.match(trimmed)
@@ -206,7 +228,7 @@ def resolve_api_key(value: Any, env: dict[str, str] | None = None) -> str:
     resolved = resolved.strip() if isinstance(resolved, str) else ""
     if not resolved:
         raise CPAConfigError(
-            f"provider {PROVIDER_ID}: apiKey references environment variable "
+            f"provider {provider_id}: apiKey references environment variable "
             f"{name}, which is not set")
     return resolved
 
@@ -226,10 +248,15 @@ def resolve_config_path(env: dict[str, str] | None = None) -> Path:
 def load_cpa_provider(
     config_path: str | Path | None = None,
     env: dict[str, str] | None = None,
+    provider_id: str | None = None,
 ) -> ProviderConfig:
-    """Load model.providers.CPA from the PilotDeck config. Validated, key resolved."""
+    """Load model.providers.<id> from the PilotDeck config.
+
+    The id defaults to JITRL_PROVIDER_ID (env) or "CPA". Validated, key
+    resolved; never returns or logging the key."""
     import yaml  # local import: only needed for config parsing
 
+    pid = (provider_id or "").strip() or provider_id_from_env(env)
     path = Path(config_path).expanduser() if config_path else resolve_config_path(env)
     if not path.is_file():
         raise CPAConfigError(f"PilotDeck config not found: {path}")
@@ -243,27 +270,27 @@ def load_cpa_provider(
 
     model_cfg = cfg.get("model")
     providers = model_cfg.get("providers") if isinstance(model_cfg, dict) else None
-    if not isinstance(providers, dict) or PROVIDER_ID not in providers:
+    if not isinstance(providers, dict) or pid not in providers:
         raise CPAConfigError(
-            f"{path}: model.providers.{PROVIDER_ID} not found")
-    prov = providers[PROVIDER_ID]
+            f"{path}: model.providers.{pid} not found")
+    prov = providers[pid]
     if not isinstance(prov, dict):
-        raise CPAConfigError(f"model.providers.{PROVIDER_ID} must be a mapping")
+        raise CPAConfigError(f"model.providers.{pid} must be a mapping")
 
     protocol = prov.get("protocol")
     if protocol not in SUPPORTED_PROTOCOLS:
         raise CPAConfigError(
-            f"model.providers.{PROVIDER_ID}: unsupported protocol {protocol!r} "
+            f"model.providers.{pid}: unsupported protocol {protocol!r} "
             f"(supported: {', '.join(SUPPORTED_PROTOCOLS)})")
     url = prov.get("url")
     if not isinstance(url, str) or not url.strip():
         raise CPAConfigError(
-            f"model.providers.{PROVIDER_ID}: url must be a non-empty string")
-    api_key = resolve_api_key(prov.get("apiKey"), env)
+            f"model.providers.{pid}: url must be a non-empty string")
+    api_key = resolve_api_key(prov.get("apiKey"), env, provider_id=pid)
     models = prov.get("models")
     models = models if isinstance(models, dict) else {}
     return ProviderConfig(
-        provider_id=PROVIDER_ID, protocol=protocol,
+        provider_id=pid, protocol=protocol,
         url=url.strip().rstrip("/"), api_key=api_key, models=models,
     )
 
@@ -304,10 +331,12 @@ def _sleep(monotonic: Callable[[float], None], seconds: float) -> None:
 
 # -------------------------------------------------------------------- client
 class CPAExecClient:
-    """OpenAI-protocol chat-completions client for the CPA provider.
+    """OpenAI-protocol chat-completions client for a PilotDeck provider.
 
-    The API key lives only in the Authorization header of outgoing requests;
-    it never appears in results, logs, or exceptions.
+    The provider id defaults to "CPA" (JITRL_PROVIDER_ID overrides it); the
+    class name is historical. The API key lives only in the Authorization
+    header of outgoing requests; it never appears in results, logs, or
+    exceptions.
     """
 
     def __init__(
@@ -369,6 +398,7 @@ class CPAExecClient:
         usage_missing = 0
         attempt = 0
         last_err: Exception | None = None
+        pid = self._provider.provider_id
         while True:
             attempt += 1
             try:
@@ -381,7 +411,7 @@ class CPAExecClient:
                     _sleep(self._sleep_fn, min(delay, RETRY_AFTER_CAP_S))
                     continue
                 raise CPATransportError(
-                    f"CPA request failed (HTTP {e.status}) after {attempt} "
+                    f"{pid} request failed (HTTP {e.status}) after {attempt} "
                     f"attempt(s): {_clip(e.detail or 'no body')}") from None
             except NetworkFailure as e:
                 last_err = e
@@ -389,7 +419,7 @@ class CPAExecClient:
                     _sleep(self._sleep_fn, BACKOFF_BASE_S * (2 ** (attempt - 1)))
                     continue
                 raise CPATransportError(
-                    f"CPA request failed (network) after {attempt} "
+                    f"{pid} request failed (network) after {attempt} "
                     f"attempt(s): {_clip(str(e))}") from None
 
             try:
@@ -402,7 +432,7 @@ class CPAExecClient:
                     _sleep(self._sleep_fn, BACKOFF_BASE_S * (2 ** (attempt - 1)))
                     continue
                 raise CPATransportError(
-                    f"CPA response malformed after {attempt} attempt(s): "
+                    f"{pid} response malformed after {attempt} attempt(s): "
                     f"{_clip(repr(e))}") from None
             finish = None
             try:
@@ -412,13 +442,13 @@ class CPAExecClient:
 
             usage = normalize_openai_usage(resp.get("usage"))
             if usage is None:
-                last_err = CPATransportError("CPA response missing usage block")
+                last_err = CPATransportError(f"{pid} response missing usage block")
                 if usage_missing < MISSING_USAGE_RETRIES:
                     usage_missing += 1
                     _sleep(self._sleep_fn, BACKOFF_BASE_S)
                     continue
                 raise CPATransportError(
-                    "CPA response missing usage block after "
+                    f"{pid} response missing usage block after "
                     f"{MISSING_USAGE_RETRIES + 1} attempt(s)")
 
             return CompletionResult(
@@ -432,7 +462,7 @@ class CPAExecClient:
 
 
 def _api_model_name(model: str) -> str:
-    """CPA/glm-5.3 -> glm-5.3 (provider model catalog is unprefixed)."""
+    """PROVIDER/model -> model (provider model catalog is unprefixed)."""
     return model.split("/", 1)[1] if "/" in model else model
 
 

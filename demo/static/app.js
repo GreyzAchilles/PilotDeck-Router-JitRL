@@ -303,7 +303,7 @@ function renderHealth(h) {
   if (!h.online_mode) {
     banner.classList.remove("hidden");
     banner.innerHTML = `当前为 <b>离线模式</b>（零网络）：实验数据面板完整可用；实时决策 API 未启用。
-      启动在线模式：<code>python -m demo.server --online</code>（需本地 llama-server 与 PilotDeck CPA 配置，
+      启动在线模式：<code>python -m demo.server --online</code>（需本地 llama-server 与 PilotDeck provider 配置，
       见 demo/README.md）。此处表单已禁用，不会白屏。`;
     banner.className = "banner banner-warn";
     btn.disabled = true;
@@ -313,7 +313,7 @@ function renderHealth(h) {
   }
   banner.classList.remove("hidden");
   if (!h.judge_online && !h.cpa_configured) {
-    banner.innerHTML = `本地 llama.cpp Judge <b>不可达</b>，且 PilotDeck CPA 配置缺失——
+    banner.innerHTML = `本地 llama.cpp Judge <b>不可达</b>，且 PilotDeck provider 配置缺失——
       在线模式下决策将返回结构化错误。排查指引见 <code>demo/README.md</code>（llama-server 端口、
       <code>PILOTDECK_CONFIG_PATH</code>）。`;
   } else if (!h.judge_online) {
@@ -321,7 +321,7 @@ function renderHealth(h) {
       请先启动 llama-server（默认 <code>http://127.0.0.1:18080</code>，可用
       <code>JITRL_JUDGE_ENDPOINT</code> 覆盖）。A（静态路由）不依赖 Judge。`;
   } else if (!h.cpa_configured) {
-    banner.innerHTML = `PilotDeck CPA 配置缺失：执行生成与盲评会失败（决策 trace 仍可查看，
+    banner.innerHTML = `PilotDeck provider 配置缺失：执行生成与盲评会失败（决策 trace 仍可查看，
       可关闭「执行生成」）。配置路径见 <code>demo/README.md</code>。`;
   } else {
     banner.classList.add("hidden");
